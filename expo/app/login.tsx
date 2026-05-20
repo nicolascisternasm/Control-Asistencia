@@ -23,7 +23,6 @@ import {
 } from 'lucide-react-native';
 import { useAuth, LoginError } from '@/contexts/AuthContext';
 import { COLORS } from '@/types';
-import { MOCK_TRABAJADORES } from '@/fixtures/mock';
 import { formatRut, validateRut } from '@/utils/rut';
 
 const errorLabel: Record<LoginError, string> = {
@@ -61,12 +60,6 @@ export default function LoginScreen(): React.ReactElement {
       setError(errorLabel[res.error]);
     }
   }, [rut, password, login]);
-
-  const usarDemo = useCallback((rutDemo: string) => {
-    setRut(formatRut(rutDemo));
-    setPassword('123456');
-    setError('');
-  }, []);
 
   return (
     <KeyboardAvoidingView
@@ -169,34 +162,6 @@ export default function LoginScreen(): React.ReactElement {
           >
             <Text style={styles.forgotText}>Olvidé mi contraseña</Text>
           </TouchableOpacity>
-        </View>
-
-        <View style={styles.demoCard}>
-          <Text style={styles.demoTitle}>Cuentas demo</Text>
-          <Text style={styles.demoHint}>Contraseña: 123456</Text>
-          {MOCK_TRABAJADORES.map((t) => (
-            <TouchableOpacity
-              key={t.id}
-              style={styles.demoRow}
-              onPress={() => usarDemo(t.rut)}
-              activeOpacity={0.7}
-            >
-              <View style={styles.demoAvatar}>
-                <Text style={styles.demoAvatarText}>
-                  {t.nombres.charAt(0)}
-                  {t.apellidos.charAt(0)}
-                </Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.demoName}>
-                  {t.nombres} {t.apellidos}
-                </Text>
-                <Text style={styles.demoMeta}>
-                  {t.rut} · {t.rol === 'admin' ? 'Supervisor/Admin' : t.cargo}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          ))}
         </View>
 
         <Text style={styles.footer}>© 2026 ControlAsistencia</Text>

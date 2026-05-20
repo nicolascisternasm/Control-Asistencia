@@ -148,23 +148,73 @@ function mapSupabaseTrabajador(row: Record<string, unknown>): Trabajador {
   };
 }
 
+/**
+ * Genera variantes razonables del RUT para buscar en la BD,
+ * porque el ERP podrá guardarlo con/sin puntos, con/sin guión, may/min.
+ */
+function rutVariants(rut: string): string[] {
+  const clean = cleanRut(rut); // sin puntos ni guión, en mayúsculas
+  const body = clean.slice(0, -1);
+  const dv = clean.slice(-1);
+  const withDash = `${body}-${dv}`;
+  // Formato con puntos: 12.345.678-9
+  const reversed = body.split('').reverse();
+  const grouped: string[] = [];
+  for (let i = 0; i < reversed.length; i += 1) {
+    if (i > 0 && i % 3 === 0) grouped.push('.');
+    grouped.push(reversed[i]);
+  }
+  const dotted = `${grouped.reverse().join('')}-${dv}`;
+  const set = new Set<string>([clean, withDash, dotted, clean.toLowerCase(), withDash.toLowerCase(), dotted.toLowerCase()]);
+  return Array.from(set);
+}
+
 async function fetchTrabajadorFromSupabaseByRut(rut: string): Promise<Trabajador | null> {
-  if (!SUPABASE_ENABLED || !supabase) return null;
+  if (!SUPABASE_ENABLED || !supabase) {
+    console.log('[repo] supabase deshabilitado, no se puede consultar usuarios');
+    return null;
+  }
   const target = cleanRut(rut);
+  const variants = rutVariants(rut);
+  console.log('[repo] consultando usuarios en supabase', { rutInput: rut, target, variants });
   try {
+    // 1) Intento directo con `in` sobre las variantes más comunes
     const { data, error } = await supabase
       .from(USUARIOS_TABLE)
       .select('*')
-      .limit(200);
+      .in('rut', variants)
+      .limit(5);
     if (error) {
-      console.log('[repo] supabase usuarios error', error.message);
+      console.log('[repo] supabase usuarios .in error', error.message, error.details);
+    } else if (data && data.length > 0) {
+      console.log('[repo] usuario encontrado via .in', { count: data.length });
+      return mapSupabaseTrabajador(data[0] as Record<string, unknown>);
+    } else {
+      console.log('[repo] .in no devolvió filas, intentando barrido');
+    }
+
+    // 2) Fallback: barrido y filtro normalizado en cliente (por si el RUT en BD tiene formato distinto)
+    const { data: all, error: err2 } = await supabase
+      .from(USUARIOS_TABLE)
+      .select('*')
+      .limit(1000);
+    if (err2) {
+      console.log('[repo] supabase usuarios barrido error', err2.message, err2.details);
       return null;
     }
-    if (!data) return null;
-    const row = (data as Record<string, unknown>[]).find(
+    if (!all) {
+      console.log('[repo] supabase usuarios barrido sin data');
+      return null;
+    }
+    console.log('[repo] barrido usuarios filas=', all.length);
+    const row = (all as Record<string, unknown>[]).find(
       (r) => cleanRut(String(r.rut ?? '')) === target,
     );
-    return row ? mapSupabaseTrabajador(row) : null;
+    if (!row) {
+      console.log('[repo] RUT no encontrado en barrido. Muestras:', (all as Record<string, unknown>[]).slice(0, 3).map((r) => r.rut));
+      return null;
+    }
+    return mapSupabaseTrabajador(row);
   } catch (e) {
     console.log('[repo] supabase usuarios exception', e);
     return null;
