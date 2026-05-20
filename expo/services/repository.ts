@@ -109,22 +109,42 @@ async function ensurePuntosSeeded(): Promise<PuntoTrabajo[]> {
 }
 
 /**
- * Mapea una fila de la tabla `trabajadores` (compartida con el ERP) al tipo local.
- * Tolerante a columnas opcionales: solo requiere id, rut, nombres, apellidos, activo.
+ * Tabla compartida con el ERP: `usuarios` en la BD MAMKAM.
+ * Mapea una fila al tipo local Trabajador. Tolerante a nombres alternativos
+ * de columnas (nombre/apellido, nombres/apellidos, full_name, etc).
  */
+const USUARIOS_TABLE = 'usuarios';
+
+function pickString(row: Record<string, unknown>, keys: string[]): string {
+  for (const k of keys) {
+    const v = row[k];
+    if (v !== null && v !== undefined && String(v).trim() !== '') return String(v);
+  }
+  return '';
+}
+
 function mapSupabaseTrabajador(row: Record<string, unknown>): Trabajador {
+  const nombres = pickString(row, ['nombres', 'nombre', 'first_name', 'firstName']);
+  const apellidos = pickString(row, ['apellidos', 'apellido', 'last_name', 'lastName']);
+  const activoRaw = row.activo ?? row.is_active ?? row.estado;
+  const activo =
+    typeof activoRaw === 'boolean'
+      ? activoRaw
+      : typeof activoRaw === 'string'
+      ? !['inactivo', 'false', '0', 'no'].includes(activoRaw.toLowerCase())
+      : activoRaw !== false;
   return {
     id: String(row.id ?? ''),
     rut: String(row.rut ?? ''),
-    nombres: String(row.nombres ?? ''),
-    apellidos: String(row.apellidos ?? ''),
-    telefono: String(row.telefono ?? ''),
-    activo: row.activo !== false,
-    cargo: String(row.cargo ?? ''),
-    empresa: String(row.empresa ?? ''),
+    nombres,
+    apellidos,
+    telefono: pickString(row, ['telefono', 'phone', 'celular']),
+    activo,
+    cargo: pickString(row, ['cargo', 'puesto', 'role_label']),
+    empresa: pickString(row, ['empresa', 'empresa_id', 'company']),
     supervisor_id: (row.supervisor_id as string | null) ?? null,
-    ultimo_login: (row.ultimo_login as string | null) ?? null,
-    rol: ((row.rol as Trabajador['rol']) ?? 'trabajador'),
+    ultimo_login: (row.ultimo_login as string | null) ?? (row.last_login as string | null) ?? null,
+    rol: ((row.rol as Trabajador['rol']) ?? (row.role as Trabajador['rol']) ?? 'trabajador'),
   };
 }
 
@@ -133,11 +153,11 @@ async function fetchTrabajadorFromSupabaseByRut(rut: string): Promise<Trabajador
   const target = cleanRut(rut);
   try {
     const { data, error } = await supabase
-      .from('trabajadores')
+      .from(USUARIOS_TABLE)
       .select('*')
-      .limit(50);
+      .limit(200);
     if (error) {
-      console.log('[repo] supabase trabajadores error', error.message);
+      console.log('[repo] supabase usuarios error', error.message);
       return null;
     }
     if (!data) return null;
@@ -146,7 +166,7 @@ async function fetchTrabajadorFromSupabaseByRut(rut: string): Promise<Trabajador
     );
     return row ? mapSupabaseTrabajador(row) : null;
   } catch (e) {
-    console.log('[repo] supabase trabajadores exception', e);
+    console.log('[repo] supabase usuarios exception', e);
     return null;
   }
 }
@@ -205,13 +225,13 @@ export const repo = {
   async verifyPassword(rut: string, inputPassword: string): Promise<boolean> {
     const key = cleanRut(rut);
 
-    // 1) Si Supabase está habilitado, validar contra la columna password_hash de trabajadores
+    // 1) Si Supabase está habilitado, validar contra la tabla `usuarios` (gestionada por el ERP)
     if (SUPABASE_ENABLED && supabase) {
       try {
         const { data, error } = await supabase
-          .from('trabajadores')
+          .from(USUARIOS_TABLE)
           .select('rut, password_hash, password')
-          .limit(200);
+          .limit(500);
         if (!error && data) {
           const row = (data as Record<string, unknown>[]).find(
             (r) => cleanRut(String(r.rut ?? '')) === key,
