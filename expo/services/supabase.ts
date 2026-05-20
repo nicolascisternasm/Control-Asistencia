@@ -2,11 +2,21 @@ import { createClient } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
-// Las credenciales deben venir de variables de entorno en .env.local
-// EXPO_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
-// EXPO_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_...
-export const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
-export const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
+// Proyecto MAMKAM. El anon key es público por diseño (RLS protege los datos).
+// Se priorizan las variables de entorno si existen, con fallback hardcoded
+// para que la app no caiga a modo local si el .env no se inyecta.
+const FALLBACK_SUPABASE_URL = 'https://tpowqjovuxnpnfbmnhby.supabase.co';
+const FALLBACK_SUPABASE_ANON_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRwb3dxam92dXhucG5mYm1uaGJ5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyMTc2NDEsImV4cCI6MjA5NDc5MzY0MX0.Cl7P0IeUTLajdvNE0DVwyf1jiZhD-sNtmXDdvd-y250';
+
+export const SUPABASE_URL =
+  process.env.EXPO_PUBLIC_SUPABASE_URL && process.env.EXPO_PUBLIC_SUPABASE_URL.length > 0
+    ? process.env.EXPO_PUBLIC_SUPABASE_URL
+    : FALLBACK_SUPABASE_URL;
+export const SUPABASE_ANON_KEY =
+  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY && process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY.length > 0
+    ? process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY
+    : FALLBACK_SUPABASE_ANON_KEY;
 
 export const SUPABASE_ENABLED: boolean =
   !!SUPABASE_URL && !!SUPABASE_ANON_KEY;
