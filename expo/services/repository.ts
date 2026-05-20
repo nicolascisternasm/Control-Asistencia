@@ -373,7 +373,7 @@ export const repo = {
 
       const { error: updErr, data: updData } = await supabase
         .from(USUARIOS_TABLE)
-        .update({ password_hash: hash, password: null })
+        .update({ password_hash: hash })
         .eq('rut', rutExacto)
         .select('rut');
       if (updErr) {
