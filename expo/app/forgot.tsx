@@ -9,47 +9,57 @@ import {
   Platform,
   ScrollView,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Stack } from 'expo-router';
-import { ArrowLeft, IdCard, Phone, Send, CheckCircle2 } from 'lucide-react-native';
-import { COLORS, SolicitudPassword } from '@/types';
-import { formatRut, validateRut, cleanRut } from '@/utils/rut';
+import {
+  ArrowLeft,
+  IdCard,
+  Search,
+  CheckCircle2,
+  AlertTriangle,
+  UserX,
+} from 'lucide-react-native';
+import { COLORS } from '@/types';
+import { formatRut, validateRut } from '@/utils/rut';
 import { repo } from '@/services/repository';
+
+type Resultado =
+  | { tipo: 'no-existe' }
+  | { tipo: 'existe'; nombre: string };
 
 export default function ForgotPasswordScreen(): React.ReactElement {
   const router = useRouter();
   const [rut, setRut] = useState<string>('');
-  const [telefono, setTelefono] = useState<string>('');
-  const [enviado, setEnviado] = useState<boolean>(false);
-  const [enviando, setEnviando] = useState<boolean>(false);
+  const [consultando, setConsultando] = useState<boolean>(false);
+  const [resultado, setResultado] = useState<Resultado | null>(null);
 
-  const enviar = useCallback(async () => {
+  const consultar = useCallback(async () => {
     if (!validateRut(rut)) {
       Alert.alert('RUT inválido', 'Revisa el RUT ingresado');
       return;
     }
-    if (telefono.replace(/\D/g, '').length < 8) {
-      Alert.alert('Teléfono inválido', 'Ingresa un teléfono de contacto');
-      return;
+    setConsultando(true);
+    try {
+      const trabajador = await repo.getTrabajadorByRut(rut);
+      if (!trabajador) {
+        setResultado({ tipo: 'no-existe' });
+      } else {
+        const nombre = `${trabajador.nombres} ${trabajador.apellidos}`.trim();
+        setResultado({ tipo: 'existe', nombre });
+      }
+    } catch (e) {
+      console.log('[forgot] error consultando', e);
+      Alert.alert('Error', 'No pudimos validar tu RUT. Intenta nuevamente.');
+    } finally {
+      setConsultando(false);
     }
-    setEnviando(true);
-    const trabajador = await repo.getTrabajadorByRut(rut);
-    const solicitud: SolicitudPassword = {
-      id: `s-${Date.now()}`,
-      trabajador_id: trabajador?.id ?? null,
-      rut: cleanRut(rut),
-      telefono,
-      estado: 'pendiente',
-      fecha_solicitud: new Date().toISOString(),
-      fecha_resolucion: null,
-      resuelto_por: null,
-      comentario: '',
-    };
-    await repo.addSolicitud(solicitud);
-    setEnviando(false);
-    setEnviado(true);
-  }, [rut, telefono]);
+  }, [rut]);
+
+  const reset = useCallback(() => {
+    setResultado(null);
+  }, []);
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
@@ -67,29 +77,11 @@ export default function ForgotPasswordScreen(): React.ReactElement {
             <View style={{ width: 40 }} />
           </View>
 
-          {enviado ? (
-            <View style={styles.successCard}>
-              <View style={styles.successIcon}>
-                <CheckCircle2 size={36} color={COLORS.success} />
-              </View>
-              <Text style={styles.successTitle}>Solicitud enviada</Text>
-              <Text style={styles.successText}>
-                Un administrador revisará tu solicitud y te contactará al teléfono indicado.
-              </Text>
-              <TouchableOpacity
-                style={styles.cta}
-                onPress={() => router.back()}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.ctaText}>Volver al inicio</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
+          {resultado === null && (
             <View style={styles.card}>
               <Text style={styles.title}>¿Olvidaste tu contraseña?</Text>
               <Text style={styles.subtitle}>
-                Deja tus datos y un administrador se pondrá en contacto contigo.
-                No necesitas correo electrónico.
+                Ingresa tu RUT para verificar si estás registrado en el sistema.
               </Text>
 
               <Text style={styles.label}>RUT</Text>
@@ -101,37 +93,84 @@ export default function ForgotPasswordScreen(): React.ReactElement {
                   placeholder="12.345.678-9"
                   placeholderTextColor={COLORS.textMuted}
                   style={styles.inputText}
-                />
-              </View>
-
-              <Text style={styles.label}>Teléfono de contacto</Text>
-              <View style={styles.input}>
-                <Phone size={20} color={COLORS.textMuted} />
-                <TextInput
-                  value={telefono}
-                  onChangeText={setTelefono}
-                  placeholder="+56 9 ..."
-                  placeholderTextColor={COLORS.textMuted}
-                  style={styles.inputText}
-                  keyboardType="phone-pad"
+                  autoCapitalize="none"
+                  autoCorrect={false}
                 />
               </View>
 
               <TouchableOpacity
-                style={[styles.cta, enviando && styles.ctaDisabled]}
-                onPress={enviar}
-                disabled={enviando}
+                style={[styles.cta, consultando && styles.ctaDisabled]}
+                onPress={consultar}
+                disabled={consultando}
                 activeOpacity={0.85}
               >
-                <Send size={18} color="#FFFFFF" />
-                <Text style={styles.ctaText}>
-                  {enviando ? 'Enviando...' : 'Enviar solicitud'}
-                </Text>
+                {consultando ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <>
+                    <Search size={18} color="#FFFFFF" />
+                    <Text style={styles.ctaText}>Verificar RUT</Text>
+                  </>
+                )}
               </TouchableOpacity>
+            </View>
+          )}
 
-              <Text style={styles.notice}>
-                El administrador recibirá tu solicitud y gestionará un nuevo acceso.
+          {resultado?.tipo === 'no-existe' && (
+            <View style={styles.card}>
+              <View style={[styles.iconBubble, { backgroundColor: COLORS.dangerLight ?? '#FEE2E2' }]}>
+                <UserX size={36} color={COLORS.danger} />
+              </View>
+              <Text style={styles.resultTitle}>No estás registrado</Text>
+              <Text style={styles.resultText}>
+                El RUT <Text style={styles.bold}>{rut}</Text> no se encuentra en la base de datos.
               </Text>
+              <Text style={styles.resultText}>
+                Solicita a tu administrador que te registre en el sistema desde el ERP para poder
+                acceder a esta aplicación.
+              </Text>
+              <TouchableOpacity style={styles.cta} onPress={reset} activeOpacity={0.85}>
+                <Text style={styles.ctaText}>Intentar con otro RUT</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.ctaSecondary}
+                onPress={() => router.back()}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.ctaSecondaryText}>Volver al inicio</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {resultado?.tipo === 'existe' && (
+            <View style={styles.card}>
+              <View style={[styles.iconBubble, { backgroundColor: COLORS.successLight }]}>
+                <CheckCircle2 size={36} color={COLORS.success} />
+              </View>
+              <Text style={styles.resultTitle}>RUT encontrado</Text>
+              {resultado.nombre.length > 0 && (
+                <Text style={[styles.resultText, styles.bold]}>{resultado.nombre}</Text>
+              )}
+
+              <View style={styles.infoBox}>
+                <AlertTriangle size={20} color={COLORS.warning} />
+                <Text style={styles.infoText}>
+                  Por seguridad, no podemos restablecer tu contraseña desde esta aplicación.
+                </Text>
+              </View>
+
+              <Text style={styles.resultText}>
+                Contacta a tu administrador para que restablezca tu contraseña desde el ERP.
+                Una vez actualizada, podrás iniciar sesión normalmente.
+              </Text>
+
+              <TouchableOpacity
+                style={styles.cta}
+                onPress={() => router.back()}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.ctaText}>Volver al inicio</Text>
+              </TouchableOpacity>
             </View>
           )}
         </ScrollView>
@@ -206,33 +245,52 @@ const styles = StyleSheet.create({
   },
   ctaDisabled: { opacity: 0.7 },
   ctaText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
-  notice: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    textAlign: 'center',
-    marginTop: 16,
-    lineHeight: 18,
-  },
-  successCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 20,
-    padding: 28,
+  ctaSecondary: {
     alignItems: 'center',
+    justifyContent: 'center',
+    height: 50,
+    borderRadius: 14,
+    marginTop: 10,
   },
-  successIcon: {
+  ctaSecondaryText: { color: COLORS.textSecondary, fontSize: 15, fontWeight: '600' },
+  iconBubble: {
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: COLORS.successLight,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
+    alignSelf: 'center',
   },
-  successTitle: { fontSize: 20, fontWeight: '800', color: COLORS.text, marginBottom: 8 },
-  successText: {
+  resultTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: COLORS.text,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  resultText: {
     fontSize: 14,
     color: COLORS.textSecondary,
     textAlign: 'center',
     lineHeight: 20,
+    marginTop: 6,
+  },
+  bold: { fontWeight: '700', color: COLORS.text },
+  infoBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    backgroundColor: COLORS.warningLight ?? '#FEF3C7',
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 16,
+    marginBottom: 4,
+  },
+  infoText: {
+    flex: 1,
+    fontSize: 13,
+    color: COLORS.text,
+    lineHeight: 18,
   },
 });
