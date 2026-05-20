@@ -31,8 +31,7 @@ function AuthGate(): React.ReactElement {
       first === 'punto-form' ||
       first === 'gasto-form' ||
       first === 'vacaciones' ||
-      first === 'vacacion-form' ||
-      first === 'documentos';
+      first === 'vacacion-form';
     if (isAuthenticated && !inAuthedRoute) {
       router.replace('/(tabs)');
     } else if (!isAuthenticated && inTabs) {
@@ -59,7 +58,6 @@ function AuthGate(): React.ReactElement {
       <Stack.Screen name="gasto-form" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
       <Stack.Screen name="vacaciones" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
       <Stack.Screen name="vacacion-form" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
-      <Stack.Screen name="documentos" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
       <Stack.Screen name="(tabs)" />
     </Stack>
   );

@@ -20,7 +20,6 @@ import {
   Shield,
   ChevronRight,
   Plane,
-  FolderOpen,
 } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { useVacaciones } from '@/contexts/VacacionesContext';
@@ -125,25 +124,6 @@ export default function ProfileScreen(): React.ReactElement {
               {vacPendientes > 0
                 ? `${vacPendientes} pendiente${vacPendientes === 1 ? '' : 's'}`
                 : 'Solicita con 5 días hábiles de anticipación'}
-            </Text>
-          </View>
-          <ChevronRight size={18} color={COLORS.textMuted} />
-        </TouchableOpacity>
-
-        <Text style={styles.section}>Documentos</Text>
-        <TouchableOpacity
-          style={styles.vacCard}
-          onPress={() => router.push('/documentos')}
-          activeOpacity={0.85}
-          testID="btn-documentos-asociados"
-        >
-          <View style={styles.vacIcon}>
-            <FolderOpen size={20} color={COLORS.primary} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.vacTitle}>Documentos Asociados</Text>
-            <Text style={styles.vacSub}>
-              Contrato, anexos, liquidaciones y documentos de empresa
             </Text>
           </View>
           <ChevronRight size={18} color={COLORS.textMuted} />
