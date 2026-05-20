@@ -1,6 +1,14 @@
+import { Platform } from 'react-native';
+
+// Polyfill de URL requerido por @supabase/supabase-js en React Native (Expo Go).
+// Sin esto, fetch falla silenciosamente en dispositivos físicos y la app cae a modo local.
+if (Platform.OS !== 'web') {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  require('react-native-url-polyfill/auto');
+}
+
 import { createClient } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
 
 // Proyecto MAMKAM. El anon key es público por diseño (RLS protege los datos).
 // Se priorizan las variables de entorno si existen, con fallback hardcoded
