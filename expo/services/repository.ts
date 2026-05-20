@@ -21,6 +21,7 @@ import { cleanRut } from '@/utils/rut';
 import { hashPassword, isHash, generateRandomPassword } from '@/utils/crypto';
 import { marcacionesService } from '@/services/marcaciones';
 import { vacacionesService } from '@/services/vacaciones';
+import { supabase, SUPABASE_ENABLED } from '@/services/supabase';
 
 const KEYS = {
   marcaciones: 'ca.marcaciones.v1',
@@ -107,9 +108,59 @@ async function ensurePuntosSeeded(): Promise<PuntoTrabajo[]> {
   }
 }
 
+/**
+ * Mapea una fila de la tabla `trabajadores` (compartida con el ERP) al tipo local.
+ * Tolerante a columnas opcionales: solo requiere id, rut, nombres, apellidos, activo.
+ */
+function mapSupabaseTrabajador(row: Record<string, unknown>): Trabajador {
+  return {
+    id: String(row.id ?? ''),
+    rut: String(row.rut ?? ''),
+    nombres: String(row.nombres ?? ''),
+    apellidos: String(row.apellidos ?? ''),
+    telefono: String(row.telefono ?? ''),
+    activo: row.activo !== false,
+    cargo: String(row.cargo ?? ''),
+    empresa: String(row.empresa ?? ''),
+    supervisor_id: (row.supervisor_id as string | null) ?? null,
+    ultimo_login: (row.ultimo_login as string | null) ?? null,
+    rol: ((row.rol as Trabajador['rol']) ?? 'trabajador'),
+  };
+}
+
+async function fetchTrabajadorFromSupabaseByRut(rut: string): Promise<Trabajador | null> {
+  if (!SUPABASE_ENABLED || !supabase) return null;
+  const target = cleanRut(rut);
+  try {
+    const { data, error } = await supabase
+      .from('trabajadores')
+      .select('*')
+      .limit(50);
+    if (error) {
+      console.log('[repo] supabase trabajadores error', error.message);
+      return null;
+    }
+    if (!data) return null;
+    const row = (data as Record<string, unknown>[]).find(
+      (r) => cleanRut(String(r.rut ?? '')) === target,
+    );
+    return row ? mapSupabaseTrabajador(row) : null;
+  } catch (e) {
+    console.log('[repo] supabase trabajadores exception', e);
+    return null;
+  }
+}
+
 export const repo = {
   async getTrabajadorByRut(rut: string): Promise<Trabajador | null> {
     const target = cleanRut(rut);
+    // 1) Fuente de verdad: tabla trabajadores en Supabase (gestionada por el ERP)
+    if (SUPABASE_ENABLED) {
+      const remote = await fetchTrabajadorFromSupabaseByRut(rut);
+      if (remote) return remote;
+      return null;
+    }
+    // 2) Fallback local (modo demo sin Supabase configurado)
     const all = await ensureTrabajadoresSeeded();
     return all.find((t) => cleanRut(t.rut) === target) ?? null;
   },
@@ -153,6 +204,38 @@ export const repo = {
 
   async verifyPassword(rut: string, inputPassword: string): Promise<boolean> {
     const key = cleanRut(rut);
+
+    // 1) Si Supabase está habilitado, validar contra la columna password_hash de trabajadores
+    if (SUPABASE_ENABLED && supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('trabajadores')
+          .select('rut, password_hash, password')
+          .limit(200);
+        if (!error && data) {
+          const row = (data as Record<string, unknown>[]).find(
+            (r) => cleanRut(String(r.rut ?? '')) === key,
+          );
+          if (row) {
+            const remoteHash = (row.password_hash as string | null) ?? null;
+            const remotePlain = (row.password as string | null) ?? null;
+            if (remoteHash) {
+              const inputHash = await hashPassword(inputPassword);
+              return inputHash === remoteHash;
+            }
+            if (remotePlain) {
+              return inputPassword === remotePlain;
+            }
+            // El registro existe pero no tiene contraseña en el ERP → caemos al store local.
+          }
+        } else if (error) {
+          console.log('[repo] supabase password verify error', error.message);
+        }
+      } catch (e) {
+        console.log('[repo] supabase password verify exception', e);
+      }
+    }
+
     const map = await readJson<Record<string, string>>(KEYS.passwords, {});
     const stored = map[key];
 

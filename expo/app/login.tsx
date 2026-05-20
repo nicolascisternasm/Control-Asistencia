@@ -28,9 +28,11 @@ import { formatRut, validateRut } from '@/utils/rut';
 
 const errorLabel: Record<LoginError, string> = {
   rut_invalido: 'El RUT ingresado no es válido',
-  no_encontrado: 'No encontramos un trabajador con ese RUT',
+  no_encontrado:
+    'No estás registrado en el sistema. Solicita a tu administrador que te registre desde el ERP.',
   password_incorrecta: 'La contraseña es incorrecta',
-  bloqueado: 'Tu cuenta está bloqueada, contacta al administrador',
+  bloqueado:
+    'Tu cuenta está inactiva. Solicita a tu administrador que la reactive desde el ERP.',
 };
 
 export default function LoginScreen(): React.ReactElement {
