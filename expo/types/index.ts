@@ -210,5 +210,4 @@ export const TIPO_MARCACION_LABEL: Record<TipoMarcacion, string> = {
   salida: 'Salida',
 };
 
-// Los datos de ejemplo están en fixtures/mock.ts
-export { MOCK_TRABAJADORES, MOCK_PUNTOS_TRABAJO, MOCK_ASIGNACIONES } from '@/fixtures/mock';
+// Los datos de ejemplo están en fixtures/mock.ts (importarlos directamente desde ahí para evitar ciclos)

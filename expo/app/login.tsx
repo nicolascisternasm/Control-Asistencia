@@ -22,7 +22,8 @@ import {
   MapPin,
 } from 'lucide-react-native';
 import { useAuth, LoginError } from '@/contexts/AuthContext';
-import { COLORS, MOCK_TRABAJADORES } from '@/types';
+import { COLORS } from '@/types';
+import { MOCK_TRABAJADORES } from '@/fixtures/mock';
 import { formatRut, validateRut } from '@/utils/rut';
 
 const errorLabel: Record<LoginError, string> = {
