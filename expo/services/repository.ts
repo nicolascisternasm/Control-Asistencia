@@ -335,6 +335,66 @@ export const repo = {
     await writeJson(KEYS.passwords, map);
   },
 
+  /**
+   * Restablece la contraseña del usuario directamente contra Supabase
+   * (tabla `usuarios`, columna `password_hash`). Usa el mismo algoritmo
+   * SHA-256 que el ERP, por lo que la nueva contraseña funcionará tanto
+   * en la app como en el ERP.
+   *
+   * Devuelve true si actualizó al menos una fila.
+   */
+  async resetPasswordRemote(rut: string, newPassword: string): Promise<boolean> {
+    const key = cleanRut(rut);
+    const hash = await hashPassword(newPassword);
+
+    if (!(SUPABASE_ENABLED && supabase)) {
+      console.log('[repo] resetPasswordRemote: supabase deshabilitado');
+      return false;
+    }
+
+    try {
+      // Buscar la fila exacta del usuario (los RUT en BD pueden venir con o sin formato)
+      const { data: rows, error: selErr } = await supabase
+        .from(USUARIOS_TABLE)
+        .select('rut')
+        .limit(500);
+      if (selErr || !rows) {
+        console.log('[repo] resetPasswordRemote select error', selErr?.message);
+        return false;
+      }
+      const match = (rows as Record<string, unknown>[]).find(
+        (r) => cleanRut(String(r.rut ?? '')) === key,
+      );
+      if (!match) {
+        console.log('[repo] resetPasswordRemote: rut no encontrado', key);
+        return false;
+      }
+      const rutExacto = String(match.rut);
+
+      const { error: updErr, data: updData } = await supabase
+        .from(USUARIOS_TABLE)
+        .update({ password_hash: hash, password: null })
+        .eq('rut', rutExacto)
+        .select('rut');
+      if (updErr) {
+        console.log('[repo] resetPasswordRemote update error', updErr.message);
+        return false;
+      }
+      const updated = Array.isArray(updData) ? updData.length : 0;
+      console.log('[repo] resetPasswordRemote ok filas=', updated);
+
+      // Sincronizar también el almacén local por si Supabase queda offline
+      const map = await readJson<Record<string, string>>(KEYS.passwords, {});
+      map[key] = hash;
+      await writeJson(KEYS.passwords, map);
+
+      return updated > 0;
+    } catch (e) {
+      console.log('[repo] resetPasswordRemote exception', e);
+      return false;
+    }
+  },
+
   async getPuntosTrabajo(): Promise<PuntoTrabajo[]> {
     return await ensurePuntosSeeded();
   },

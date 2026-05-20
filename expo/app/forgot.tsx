@@ -20,6 +20,9 @@ import {
   CheckCircle2,
   AlertTriangle,
   UserX,
+  Lock,
+  Eye,
+  EyeOff,
 } from 'lucide-react-native';
 import { COLORS } from '@/types';
 import { formatRut, validateRut } from '@/utils/rut';
@@ -27,13 +30,19 @@ import { repo } from '@/services/repository';
 
 type Resultado =
   | { tipo: 'no-existe' }
-  | { tipo: 'existe'; nombre: string };
+  | { tipo: 'existe'; nombre: string }
+  | { tipo: 'exito' };
 
 export default function ForgotPasswordScreen(): React.ReactElement {
   const router = useRouter();
   const [rut, setRut] = useState<string>('');
   const [consultando, setConsultando] = useState<boolean>(false);
   const [resultado, setResultado] = useState<Resultado | null>(null);
+
+  const [nuevaPwd, setNuevaPwd] = useState<string>('');
+  const [confirmarPwd, setConfirmarPwd] = useState<string>('');
+  const [mostrarPwd, setMostrarPwd] = useState<boolean>(false);
+  const [guardando, setGuardando] = useState<boolean>(false);
 
   const consultar = useCallback(async () => {
     if (!validateRut(rut)) {
@@ -57,8 +66,40 @@ export default function ForgotPasswordScreen(): React.ReactElement {
     }
   }, [rut]);
 
+  const guardarPwd = useCallback(async () => {
+    const p1 = nuevaPwd.trim();
+    const p2 = confirmarPwd.trim();
+    if (p1.length < 4) {
+      Alert.alert('Contraseña muy corta', 'Debe tener al menos 4 caracteres');
+      return;
+    }
+    if (p1 !== p2) {
+      Alert.alert('No coinciden', 'La confirmación no coincide con la nueva contraseña');
+      return;
+    }
+    setGuardando(true);
+    try {
+      const ok = await repo.resetPasswordRemote(rut, p1);
+      if (ok) {
+        setResultado({ tipo: 'exito' });
+      } else {
+        Alert.alert(
+          'No pudimos actualizar',
+          'No se logró actualizar la contraseña en el servidor. Verifica tu conexión e inténtalo de nuevo.',
+        );
+      }
+    } catch (e) {
+      console.log('[forgot] error reset', e);
+      Alert.alert('Error', 'Ocurrió un problema al actualizar tu contraseña.');
+    } finally {
+      setGuardando(false);
+    }
+  }, [rut, nuevaPwd, confirmarPwd]);
+
   const reset = useCallback(() => {
     setResultado(null);
+    setNuevaPwd('');
+    setConfirmarPwd('');
   }, []);
 
   return (
@@ -155,21 +196,87 @@ export default function ForgotPasswordScreen(): React.ReactElement {
               <View style={styles.infoBox}>
                 <AlertTriangle size={20} color={COLORS.warning} />
                 <Text style={styles.infoText}>
-                  Por seguridad, no podemos restablecer tu contraseña desde esta aplicación.
+                  Define una nueva contraseña. Se actualizará tanto en esta app como en el ERP
+                  (mismo sistema de credenciales).
                 </Text>
               </View>
 
-              <Text style={styles.resultText}>
-                Contacta a tu administrador para que restablezca tu contraseña desde el ERP.
-                Una vez actualizada, podrás iniciar sesión normalmente.
-              </Text>
+              <Text style={styles.label}>Nueva contraseña</Text>
+              <View style={styles.input}>
+                <Lock size={20} color={COLORS.textMuted} />
+                <TextInput
+                  value={nuevaPwd}
+                  onChangeText={setNuevaPwd}
+                  placeholder="Mínimo 4 caracteres"
+                  placeholderTextColor={COLORS.textMuted}
+                  style={styles.inputText}
+                  secureTextEntry={!mostrarPwd}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <TouchableOpacity onPress={() => setMostrarPwd((v) => !v)} hitSlop={10}>
+                  {mostrarPwd ? (
+                    <EyeOff size={20} color={COLORS.textMuted} />
+                  ) : (
+                    <Eye size={20} color={COLORS.textMuted} />
+                  )}
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.label}>Confirmar contraseña</Text>
+              <View style={styles.input}>
+                <Lock size={20} color={COLORS.textMuted} />
+                <TextInput
+                  value={confirmarPwd}
+                  onChangeText={setConfirmarPwd}
+                  placeholder="Repite la contraseña"
+                  placeholderTextColor={COLORS.textMuted}
+                  style={styles.inputText}
+                  secureTextEntry={!mostrarPwd}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              </View>
 
               <TouchableOpacity
-                style={styles.cta}
-                onPress={() => router.back()}
+                style={[styles.cta, guardando && styles.ctaDisabled]}
+                onPress={guardarPwd}
+                disabled={guardando}
                 activeOpacity={0.85}
               >
-                <Text style={styles.ctaText}>Volver al inicio</Text>
+                {guardando ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.ctaText}>Guardar nueva contraseña</Text>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.ctaSecondary}
+                onPress={reset}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.ctaSecondaryText}>Cancelar</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {resultado?.tipo === 'exito' && (
+            <View style={styles.card}>
+              <View style={[styles.iconBubble, { backgroundColor: COLORS.successLight }]}>
+                <CheckCircle2 size={36} color={COLORS.success} />
+              </View>
+              <Text style={styles.resultTitle}>Contraseña actualizada</Text>
+              <Text style={styles.resultText}>
+                Listo. Ya puedes iniciar sesión con tu nueva contraseña. Recuerda que también
+                funciona en el ERP.
+              </Text>
+              <TouchableOpacity
+                style={styles.cta}
+                onPress={() => router.replace('/login')}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.ctaText}>Ir al inicio de sesión</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -217,7 +324,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.textSecondary,
     marginBottom: 8,
-    marginTop: 8,
+    marginTop: 14,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
