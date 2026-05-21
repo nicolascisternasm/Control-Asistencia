@@ -116,6 +116,13 @@ async function ensurePuntosSeeded(): Promise<PuntoTrabajo[]> {
  */
 const USUARIOS_TABLE = 'trabajadores';
 
+/**
+ * Tabla espejo (gestionada por el ERP) que guarda la contraseña del trabajador.
+ * Comparte el mismo `id` que la tabla `trabajadores`, por lo que el vínculo
+ * entre ambas se hace por id. Columnas relevantes: id, password_hash, password.
+ */
+const PASSWORDS_TABLE = 'usuarios';
+
 /** Divide "Camila Almonte Soto" -> { nombres: 'Camila', apellidos: 'Almonte Soto' }. */
 function splitNombreCompleto(full: string): { nombres: string; apellidos: string } {
   const parts = (full ?? '').trim().split(/\s+/).filter(Boolean);
@@ -446,18 +453,22 @@ export const repo = {
   async verifyPassword(rut: string, inputPassword: string): Promise<boolean> {
     const key = cleanRut(rut);
 
-    // 1) Si Supabase está habilitado, validar contra la tabla `usuarios` (gestionada por el ERP)
+    // 1) Si Supabase está habilitado, validar contra la tabla `usuarios`
+    //    (espejo gestionado por el ERP, vinculada a `trabajadores` por id).
     if (SUPABASE_ENABLED && supabase) {
       try {
-        const { data, error } = await supabase
-          .from(USUARIOS_TABLE)
-          .select('rut, password_hash, password')
-          .limit(500);
-        if (!error && data) {
-          const row = (data as Record<string, unknown>[]).find(
-            (r) => cleanRut(String(r.rut ?? '')) === key,
-          );
-          if (row) {
+        // Primero buscamos al trabajador para obtener su id
+        const trabajador = await fetchTrabajadorFromSupabaseByRut(rut);
+        if (trabajador?.id) {
+          const { data, error } = await supabase
+            .from(PASSWORDS_TABLE)
+            .select('id, password_hash, password')
+            .eq('id', trabajador.id)
+            .maybeSingle();
+          if (error) {
+            console.log('[repo] supabase password verify error', error.message);
+          } else if (data) {
+            const row = data as Record<string, unknown>;
             const remoteHash = (row.password_hash as string | null) ?? null;
             const remotePlain = (row.password as string | null) ?? null;
             if (remoteHash) {
@@ -467,10 +478,10 @@ export const repo = {
             if (remotePlain) {
               return inputPassword === remotePlain;
             }
-            // El registro existe pero no tiene contraseña en el ERP → caemos al store local.
+            console.log('[repo] usuarios row sin password para id', trabajador.id);
+          } else {
+            console.log('[repo] usuarios sin fila para id', trabajador.id);
           }
-        } else if (error) {
-          console.log('[repo] supabase password verify error', error.message);
         }
       } catch (e) {
         console.log('[repo] supabase password verify exception', e);
@@ -524,29 +535,18 @@ export const repo = {
     }
 
     try {
-      // Buscar la fila exacta del usuario (los RUT en BD pueden venir con o sin formato)
-      const { data: rows, error: selErr } = await supabase
-        .from(USUARIOS_TABLE)
-        .select('rut')
-        .limit(500);
-      if (selErr || !rows) {
-        console.log('[repo] resetPasswordRemote select error', selErr?.message);
+      // Resolver el id del trabajador (la tabla `usuarios` se enlaza por id)
+      const trabajador = await fetchTrabajadorFromSupabaseByRut(rut);
+      if (!trabajador?.id) {
+        console.log('[repo] resetPasswordRemote: trabajador no encontrado', key);
         return false;
       }
-      const match = (rows as Record<string, unknown>[]).find(
-        (r) => cleanRut(String(r.rut ?? '')) === key,
-      );
-      if (!match) {
-        console.log('[repo] resetPasswordRemote: rut no encontrado', key);
-        return false;
-      }
-      const rutExacto = String(match.rut);
 
       const { error: updErr, data: updData } = await supabase
-        .from(USUARIOS_TABLE)
+        .from(PASSWORDS_TABLE)
         .update({ password_hash: hash })
-        .eq('rut', rutExacto)
-        .select('rut');
+        .eq('id', trabajador.id)
+        .select('id');
       if (updErr) {
         console.log('[repo] resetPasswordRemote update error', updErr.message);
         return false;
