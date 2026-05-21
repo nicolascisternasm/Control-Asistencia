@@ -45,6 +45,16 @@ export interface SolicitudOmitirColacion {
   resuelto_por: string | null;
 }
 
+export interface PermisosTrabajador {
+  puede_cotizar?: boolean;
+  puede_gastos?: boolean;
+  puede_vacaciones?: boolean;
+  puede_marcaciones?: boolean;
+  puede_oc?: boolean;
+  puede_rrhh?: boolean;
+  puede_finanzas?: boolean;
+}
+
 export interface Trabajador {
   id: string;
   rut: string;
@@ -60,6 +70,10 @@ export interface Trabajador {
   email?: string;
   fecha_ingreso?: string | null;
   horario?: HorarioTrabajador;
+  app_activa?: boolean;
+  estado?: string;
+  sueldo?: number | null;
+  permisos?: PermisosTrabajador;
 }
 
 export interface Jornada {

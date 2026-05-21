@@ -23,7 +23,8 @@ export type LoginError =
   | 'rut_invalido'
   | 'no_encontrado'
   | 'password_incorrecta'
-  | 'bloqueado';
+  | 'bloqueado'
+  | 'app_desactivada';
 
 export interface LoginResult {
   ok: boolean;
@@ -71,6 +72,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         const t = await repo.getTrabajadorByRut(rut);
         if (!t) return { ok: false, error: 'no_encontrado' };
         if (!t.activo) return { ok: false, error: 'bloqueado' };
+        if (t.app_activa === false) return { ok: false, error: 'app_desactivada' };
         const passwordOk = await repo.verifyPassword(rut, password);
         if (!passwordOk) {
           return { ok: false, error: 'password_incorrecta' };
@@ -142,7 +144,9 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     isLoading,
     isSubmitting,
     isAuthenticated: !!trabajador,
-    isAdmin: trabajador?.rol === 'admin' || trabajador?.rol === 'supervisor',
+    // La app móvil ya no tiene rol admin: todos son trabajadores. Se mantiene
+    // la propiedad por compatibilidad con pantallas existentes.
+    isAdmin: false,
     login,
     logout,
     refreshTrabajador,

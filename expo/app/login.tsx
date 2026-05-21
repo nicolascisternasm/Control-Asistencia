@@ -32,6 +32,8 @@ const errorLabel: Record<LoginError, string> = {
   password_incorrecta: 'La contraseña es incorrecta',
   bloqueado:
     'Tu cuenta está inactiva. Solicita a tu administrador que la reactive desde el ERP.',
+  app_desactivada:
+    'No tienes habilitado el acceso a la app. Contacta a tu administrador para que active tu acceso desde el ERP.',
 };
 
 export default function LoginScreen(): React.ReactElement {

@@ -109,11 +109,20 @@ async function ensurePuntosSeeded(): Promise<PuntoTrabajo[]> {
 }
 
 /**
- * Tabla compartida con el ERP: `usuarios` en la BD MAMKAM.
- * Mapea una fila al tipo local Trabajador. Tolerante a nombres alternativos
- * de columnas (nombre/apellido, nombres/apellidos, full_name, etc).
+ * Tabla compartida con el ERP: `trabajadores` en la BD.
+ * Schema: id, empresa_id, nombre, rut, telefono, cargo, sueldo, fecha_ingreso,
+ * estado, created_at, email, app_activa, puede_cotizar, puede_gastos,
+ * puede_vacaciones, puede_marcaciones, puede_oc, puede_rrhh, puede_finanzas.
  */
-const USUARIOS_TABLE = 'usuarios';
+const USUARIOS_TABLE = 'trabajadores';
+
+/** Divide "Camila Almonte Soto" -> { nombres: 'Camila', apellidos: 'Almonte Soto' }. */
+function splitNombreCompleto(full: string): { nombres: string; apellidos: string } {
+  const parts = (full ?? '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return { nombres: '', apellidos: '' };
+  if (parts.length === 1) return { nombres: parts[0], apellidos: '' };
+  return { nombres: parts[0], apellidos: parts.slice(1).join(' ') };
+}
 
 function pickString(row: Record<string, unknown>, keys: string[]): string {
   for (const k of keys) {
@@ -124,15 +133,41 @@ function pickString(row: Record<string, unknown>, keys: string[]): string {
 }
 
 function mapSupabaseTrabajador(row: Record<string, unknown>): Trabajador {
-  const nombres = pickString(row, ['nombres', 'nombre', 'first_name', 'firstName']);
-  const apellidos = pickString(row, ['apellidos', 'apellido', 'last_name', 'lastName']);
-  const activoRaw = row.activo ?? row.is_active ?? row.estado;
+  // Soporta tanto el schema nuevo (`nombre` único) como el legacy (`nombres`/`apellidos`).
+  let nombres = pickString(row, ['nombres', 'first_name', 'firstName']);
+  let apellidos = pickString(row, ['apellidos', 'apellido', 'last_name', 'lastName']);
+  if (!nombres && !apellidos) {
+    const full = pickString(row, ['nombre', 'nombre_completo', 'full_name']);
+    const split = splitNombreCompleto(full);
+    nombres = split.nombres;
+    apellidos = split.apellidos;
+  }
+
+  const estadoStr = typeof row.estado === 'string' ? (row.estado as string).toLowerCase() : '';
+  const appActivaRaw = row.app_activa;
+  const appActiva =
+    typeof appActivaRaw === 'boolean'
+      ? appActivaRaw
+      : typeof appActivaRaw === 'string'
+      ? !['false', '0', 'no'].includes(appActivaRaw.toLowerCase())
+      : appActivaRaw !== false;
+
+  const activoLegacy = row.activo ?? row.is_active;
   const activo =
-    typeof activoRaw === 'boolean'
-      ? activoRaw
-      : typeof activoRaw === 'string'
-      ? !['inactivo', 'false', '0', 'no'].includes(activoRaw.toLowerCase())
-      : activoRaw !== false;
+    typeof activoLegacy === 'boolean'
+      ? activoLegacy
+      : estadoStr
+      ? !['inactivo', 'bloqueado', 'suspendido', 'false', '0', 'no'].includes(estadoStr)
+      : true;
+
+  const sueldoRaw = row.sueldo;
+  const sueldo =
+    typeof sueldoRaw === 'number'
+      ? sueldoRaw
+      : typeof sueldoRaw === 'string' && sueldoRaw.trim() !== ''
+      ? Number(sueldoRaw)
+      : null;
+
   return {
     id: String(row.id ?? ''),
     rut: String(row.rut ?? ''),
@@ -141,16 +176,28 @@ function mapSupabaseTrabajador(row: Record<string, unknown>): Trabajador {
     telefono: pickString(row, ['telefono', 'phone', 'celular']),
     activo,
     cargo: pickString(row, ['cargo', 'puesto', 'role_label']),
-    empresa: pickString(row, ['empresa', 'empresa_id', 'company']),
+    empresa: pickString(row, ['empresa_id', 'empresa', 'company']),
     supervisor_id: (row.supervisor_id as string | null) ?? null,
     ultimo_login: (row.ultimo_login as string | null) ?? (row.last_login as string | null) ?? null,
-    rol: ((row.rol as Trabajador['rol']) ?? (row.role as Trabajador['rol']) ?? 'trabajador'),
+    rol: 'trabajador',
     email: pickString(row, ['email', 'correo', 'mail', 'email_address']),
     fecha_ingreso:
       (row.fecha_ingreso as string | null) ??
       (row.fecha_contratacion as string | null) ??
       (row.hire_date as string | null) ??
       null,
+    app_activa: appActiva,
+    estado: estadoStr || (activo ? 'activo' : 'inactivo'),
+    sueldo,
+    permisos: {
+      puede_cotizar: row.puede_cotizar === true,
+      puede_gastos: row.puede_gastos === true,
+      puede_vacaciones: row.puede_vacaciones === true,
+      puede_marcaciones: row.puede_marcaciones === true,
+      puede_oc: row.puede_oc === true,
+      puede_rrhh: row.puede_rrhh === true,
+      puede_finanzas: row.puede_finanzas === true,
+    },
   };
 }
 
@@ -163,20 +210,31 @@ function normalizeEmpresa(s: string): string {
     .toLowerCase();
 }
 
-/** Construye el payload que se envía a la tabla `usuarios` en Supabase. */
+/** Construye el payload que se envía a la tabla `trabajadores` en Supabase. */
 function trabajadorToRow(t: Partial<Trabajador>): Record<string, unknown> {
   const row: Record<string, unknown> = {};
   if (t.rut !== undefined) row.rut = t.rut;
-  if (t.nombres !== undefined) row.nombres = t.nombres;
-  if (t.apellidos !== undefined) row.apellidos = t.apellidos;
+  if (t.nombres !== undefined || t.apellidos !== undefined) {
+    const nombre = `${t.nombres ?? ''} ${t.apellidos ?? ''}`.trim();
+    if (nombre) row.nombre = nombre;
+  }
   if (t.telefono !== undefined) row.telefono = t.telefono;
-  if (t.activo !== undefined) row.activo = t.activo;
   if (t.cargo !== undefined) row.cargo = t.cargo;
-  if (t.empresa !== undefined) row.empresa = t.empresa;
-  if (t.rol !== undefined) row.rol = t.rol;
+  if (t.empresa !== undefined) row.empresa_id = t.empresa;
   if (t.email !== undefined) row.email = t.email;
   if (t.fecha_ingreso !== undefined) row.fecha_ingreso = t.fecha_ingreso;
-  if (t.supervisor_id !== undefined) row.supervisor_id = t.supervisor_id;
+  if (t.estado !== undefined) row.estado = t.estado;
+  if (t.app_activa !== undefined) row.app_activa = t.app_activa;
+  if (t.sueldo !== undefined) row.sueldo = t.sueldo;
+  if (t.permisos) {
+    if (t.permisos.puede_cotizar !== undefined) row.puede_cotizar = t.permisos.puede_cotizar;
+    if (t.permisos.puede_gastos !== undefined) row.puede_gastos = t.permisos.puede_gastos;
+    if (t.permisos.puede_vacaciones !== undefined) row.puede_vacaciones = t.permisos.puede_vacaciones;
+    if (t.permisos.puede_marcaciones !== undefined) row.puede_marcaciones = t.permisos.puede_marcaciones;
+    if (t.permisos.puede_oc !== undefined) row.puede_oc = t.permisos.puede_oc;
+    if (t.permisos.puede_rrhh !== undefined) row.puede_rrhh = t.permisos.puede_rrhh;
+    if (t.permisos.puede_finanzas !== undefined) row.puede_finanzas = t.permisos.puede_finanzas;
+  }
   return row;
 }
 
