@@ -99,6 +99,44 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     setTrabajador(null);
   }, []);
 
+  const refreshTrabajador = useCallback(async (): Promise<Trabajador | null> => {
+    if (!trabajador) return null;
+    try {
+      const fresh = await repo.getTrabajadorById(trabajador.id);
+      if (fresh) {
+        setTrabajador(fresh);
+        return fresh;
+      }
+    } catch (e) {
+      console.log('[auth] refresh error', e);
+    }
+    return null;
+  }, [trabajador]);
+
+  const updateProfile = useCallback(
+    async (patch: Partial<Trabajador>): Promise<void> => {
+      if (!trabajador) throw new Error('No hay sesión activa');
+      await repo.updateTrabajador(trabajador.id, patch);
+      const fresh = await repo.getTrabajadorById(trabajador.id);
+      if (fresh) setTrabajador(fresh);
+      else setTrabajador({ ...trabajador, ...patch });
+    },
+    [trabajador],
+  );
+
+  const changePassword = useCallback(
+    async (newPassword: string): Promise<boolean> => {
+      if (!trabajador) throw new Error('No hay sesión activa');
+      const ok = await repo.resetPasswordRemote(trabajador.rut, newPassword);
+      if (!ok) {
+        // Fallback local si Supabase no está disponible
+        await repo.setPassword(trabajador.rut, newPassword);
+      }
+      return ok;
+    },
+    [trabajador],
+  );
+
   return {
     trabajador,
     isLoading,
@@ -107,5 +145,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     isAdmin: trabajador?.rol === 'admin' || trabajador?.rol === 'supervisor',
     login,
     logout,
+    refreshTrabajador,
+    updateProfile,
+    changePassword,
   };
 });
