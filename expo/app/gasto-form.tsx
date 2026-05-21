@@ -132,12 +132,145 @@ export default function GastoFormScreen(): React.ReactElement {
   }, []);
 
   const analizarConIA = useCallback(async () => {
-    Alert.alert(
-      'Análisis con IA',
-      'Esta función requiere configuración adicional. Por ahora ingresa los datos manualmente.',
-      [{ text: 'Entendido' }],
-    );
-  }, []);
+    if (!fotoBase64) {
+      Alert.alert('Sin imagen', 'Primero toma o elige una foto de la boleta');
+      return;
+    }
+    const TOOLKIT_URL = process.env.EXPO_PUBLIC_TOOLKIT_URL;
+    const SECRET = process.env.EXPO_PUBLIC_RORK_TOOLKIT_SECRET_KEY;
+    if (!TOOLKIT_URL || !SECRET) {
+      Alert.alert('Configuración', 'Falta configurar el servicio de IA');
+      return;
+    }
+    setAnalizando(true);
+    try {
+      const prompt = `Eres un asistente que extrae datos de boletas y facturas chilenas. Analiza la imagen y devuelve SOLO un JSON válido (sin texto adicional, sin markdown, sin \`\`\`) con esta estructura exacta:
+{
+  "monto": number (monto total en CLP, solo el número entero, sin puntos ni símbolos),
+  "comercio": string (nombre del comercio o emisor),
+  "rut_comercio": string (RUT del emisor con formato XX.XXX.XXX-X, o vacío si no se ve),
+  "numero_documento": string (número del documento, o vacío),
+  "tipo_documento": "boleta" | "factura" | "otro",
+  "fecha": string (en formato AAAA-MM-DD, o vacío si no se ve),
+  "categoria": "combustible" | "alimentacion" | "alojamiento" | "materiales" | "transporte" | "herramientas" | "otros",
+  "descripcion": string (resumen corto de lo comprado, máx 80 chars)
+}
+Si un dato no se ve claro, déjalo vacío ("") o 0. NO inventes datos.`;
+
+      const body = {
+        model: 'google/gemini-3.5-flash',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt },
+              {
+                type: 'image_url',
+                image_url: { url: `data:image/jpeg;base64,${fotoBase64}` },
+              },
+            ],
+          },
+        ],
+      };
+
+      const res = await fetch(`${TOOLKIT_URL}/v2/vercel/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${SECRET}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const errTxt = await res.text();
+        console.log('[gasto] IA error', res.status, errTxt);
+        Alert.alert('Error IA', `No se pudo analizar (${res.status})`);
+        return;
+      }
+
+      const json = await res.json();
+      const content: string = json?.choices?.[0]?.message?.content ?? '';
+      console.log('[gasto] IA raw', content);
+
+      let cleaned = content.trim();
+      const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (fenceMatch) cleaned = fenceMatch[1].trim();
+      const jsonStart = cleaned.indexOf('{');
+      const jsonEnd = cleaned.lastIndexOf('}');
+      if (jsonStart >= 0 && jsonEnd > jsonStart) {
+        cleaned = cleaned.slice(jsonStart, jsonEnd + 1);
+      }
+
+      let data: {
+        monto?: number | string;
+        comercio?: string;
+        rut_comercio?: string;
+        numero_documento?: string;
+        tipo_documento?: string;
+        fecha?: string;
+        categoria?: string;
+        descripcion?: string;
+      };
+      try {
+        data = JSON.parse(cleaned);
+      } catch (e) {
+        console.log('[gasto] IA parse error', e, cleaned);
+        Alert.alert('Error', 'La IA no devolvió datos válidos. Intenta nuevamente o ingresa manualmente.');
+        return;
+      }
+
+      let aplicados = 0;
+      if (data.monto !== undefined && data.monto !== null && `${data.monto}`.length > 0) {
+        const n = typeof data.monto === 'number'
+          ? data.monto
+          : parseFloat(String(data.monto).replace(/\./g, '').replace(',', '.'));
+        if (!isNaN(n) && n > 0) {
+          setMonto(String(Math.round(n)));
+          aplicados++;
+        }
+      }
+      if (data.comercio && data.comercio.trim().length > 0) {
+        setComercio(data.comercio.trim());
+        aplicados++;
+      }
+      if (data.rut_comercio && data.rut_comercio.trim().length > 0) {
+        setRutComercio(data.rut_comercio.trim());
+        aplicados++;
+      }
+      if (data.numero_documento && String(data.numero_documento).trim().length > 0) {
+        setNumeroDoc(String(data.numero_documento).trim());
+        aplicados++;
+      }
+      if (data.tipo_documento && (TIPOS_DOC as readonly string[]).includes(data.tipo_documento)) {
+        setTipoDoc(data.tipo_documento as TipoDoc);
+        aplicados++;
+      }
+      if (data.fecha && /^\d{4}-\d{2}-\d{2}$/.test(data.fecha)) {
+        setFecha(data.fecha);
+        aplicados++;
+      }
+      if (data.categoria && (CATEGORIAS as string[]).includes(data.categoria)) {
+        setCategoria(data.categoria as CategoriaGasto);
+        aplicados++;
+      }
+      if (data.descripcion && data.descripcion.trim().length > 0) {
+        setDescripcion(data.descripcion.trim());
+        aplicados++;
+      }
+
+      if (aplicados === 0) {
+        Alert.alert('Sin datos', 'No se pudieron extraer datos de la imagen. Revisa que la boleta esté clara.');
+      } else {
+        Alert.alert('Listo', `Se completaron ${aplicados} campo${aplicados === 1 ? '' : 's'} automáticamente. Revisa antes de guardar.`);
+      }
+    } catch (e) {
+      console.log('[gasto] IA fetch error', e);
+      Alert.alert('Error', 'No se pudo conectar con el servicio de IA');
+    } finally {
+      setAnalizando(false);
+    }
+  }, [fotoBase64]);
 
   const guardar = useCallback(async () => {
     if (!trabajador) return;
