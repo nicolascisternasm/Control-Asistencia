@@ -291,7 +291,24 @@ Si un dato no se ve claro, déjalo vacío ("") o 0. NO inventes datos.`;
 
     let fotoUrl: string | null = null;
     if (fotoUri) {
-      fotoUrl = await gastosService.uploadFoto(fotoUri, trabajador.id);
+      try {
+        fotoUrl = await gastosService.uploadFoto(fotoUri, trabajador.id);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.log('[gasto] upload foto error', msg);
+        const cont = await new Promise<boolean>((resolve) => {
+          Alert.alert(
+            'No se pudo subir la imagen',
+            `${msg}\n\n¿Guardar el gasto sin la imagen?`,
+            [
+              { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
+              { text: 'Guardar sin imagen', onPress: () => resolve(true) },
+            ],
+            { cancelable: false },
+          );
+        });
+        if (!cont) return;
+      }
     }
 
     const gasto: Gasto = {

@@ -48,28 +48,28 @@ async function fetchToBase64(uri: string): Promise<{ base64: string; mime: strin
 
 export const gastosService = {
   async uploadFoto(localUri: string, trabajadorId: string): Promise<string | null> {
-    if (!SUPABASE_ENABLED || !supabase) return null;
-    try {
-      const { base64, mime } = await fetchToBase64(localUri);
-      const ext = mime.includes('png') ? 'png' : 'jpg';
-      const path = `${trabajadorId}/${Date.now()}.${ext}`;
-      const bytes = base64ToUint8Array(base64);
-      const { error } = await supabase.storage
-        .from(GASTOS_BUCKET)
-        .upload(path, bytes, {
-          contentType: mime,
-          upsert: false,
-        });
-      if (error) {
-        console.log('[gastos] upload error', error.message);
-        return null;
-      }
-      const { data: pub } = supabase.storage.from(GASTOS_BUCKET).getPublicUrl(path);
-      return pub?.publicUrl ?? null;
-    } catch (e) {
-      console.log('[gastos] upload exception', e);
-      return null;
+    if (!SUPABASE_ENABLED || !supabase) {
+      throw new Error('Supabase no está habilitado');
     }
+    const { base64, mime } = await fetchToBase64(localUri);
+    const ext = mime.includes('png') ? 'png' : 'jpg';
+    const path = `${trabajadorId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const bytes = base64ToUint8Array(base64);
+    const { error } = await supabase.storage
+      .from(GASTOS_BUCKET)
+      .upload(path, bytes, {
+        contentType: mime,
+        upsert: false,
+      });
+    if (error) {
+      console.log('[gastos] upload error', error.message);
+      throw new Error(`Storage: ${error.message}`);
+    }
+    const { data: pub } = supabase.storage.from(GASTOS_BUCKET).getPublicUrl(path);
+    if (!pub?.publicUrl) {
+      throw new Error('No se pudo obtener la URL pública de la imagen');
+    }
+    return pub.publicUrl;
   },
 
   async list(trabajadorId?: string, empresaId?: string): Promise<Gasto[]> {
