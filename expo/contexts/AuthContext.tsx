@@ -103,10 +103,14 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
   const refreshTrabajador = useCallback(async (): Promise<Trabajador | null> => {
     if (!trabajador) return null;
+    const currentId = trabajador.id;
     try {
-      const fresh = await repo.getTrabajadorById(trabajador.id);
+      const fresh = await repo.getTrabajadorById(currentId);
       if (fresh) {
-        setTrabajador(fresh);
+        // Solo actualizamos si todavía hay una sesión activa con el mismo id;
+        // si el usuario cerró sesión mientras el refresh estaba en vuelo, no
+        // revivimos el estado.
+        setTrabajador((prev) => (prev && prev.id === currentId ? fresh : prev));
         return fresh;
       }
     } catch (e) {
@@ -118,10 +122,13 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const updateProfile = useCallback(
     async (patch: Partial<Trabajador>): Promise<void> => {
       if (!trabajador) throw new Error('No hay sesión activa');
-      await repo.updateTrabajador(trabajador.id, patch);
-      const fresh = await repo.getTrabajadorById(trabajador.id);
-      if (fresh) setTrabajador(fresh);
-      else setTrabajador({ ...trabajador, ...patch });
+      const currentId = trabajador.id;
+      await repo.updateTrabajador(currentId, patch);
+      const fresh = await repo.getTrabajadorById(currentId);
+      setTrabajador((prev) => {
+        if (!prev || prev.id !== currentId) return prev;
+        return fresh ?? { ...prev, ...patch };
+      });
     },
     [trabajador],
   );
