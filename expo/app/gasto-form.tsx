@@ -29,6 +29,7 @@ import {
   Loader2,
 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as Crypto from 'expo-crypto';
 import {
   COLORS,
   Gasto,
@@ -294,7 +295,7 @@ Si un dato no se ve claro, déjalo vacío ("") o 0. NO inventes datos.`;
     }
 
     const gasto: Gasto = {
-      id: `g-${Date.now()}`,
+      id: Crypto.randomUUID(),
       trabajador_id: trabajador.id,
       trabajador_nombre: `${trabajador.nombres} ${trabajador.apellidos}`,
       fecha_gasto: fecha,
@@ -318,7 +319,8 @@ Si un dato no se ve claro, déjalo vacío ("") o 0. NO inventes datos.`;
       router.back();
     } catch (e) {
       console.log('[gasto] save error', e);
-      Alert.alert('Error', 'No se pudo guardar el gasto');
+      const msg = e instanceof Error ? e.message : String(e);
+      Alert.alert('No se pudo guardar', msg);
     }
   }, [
     trabajador,

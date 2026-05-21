@@ -19,7 +19,9 @@ import {
   XCircle,
   TrendingUp,
   Wallet,
+  Activity,
 } from 'lucide-react-native';
+import { gastosService } from '@/services/gastos';
 import { useRouter, useFocusEffect } from 'expo-router';
 import {
   COLORS,
@@ -143,6 +145,27 @@ export default function GastosScreen(): React.ReactElement {
             {isAdmin ? 'Gastos de todo el equipo' : 'Tus gastos con tarjeta'}
           </Text>
         </View>
+        {isAdmin && (
+          <TouchableOpacity
+            style={styles.diagBtn}
+            onPress={async () => {
+              const d = await gastosService.diagnose();
+              Alert.alert(
+                'Diagnóstico Supabase',
+                `Habilitado: ${d.enabled ? 'sí' : 'NO'}\n` +
+                  `URL: ${d.url ?? '—'}\n` +
+                  `Key length: ${d.keyLen}\n` +
+                  `SELECT gastos: ${d.canSelect ? 'OK' : 'FALLA'}\n` +
+                  `INSERT gastos: ${d.canInsert ? 'OK' : 'FALLA'}\n` +
+                  `Bucket fotos: ${d.canBucket ? 'OK' : 'FALLA'}\n\n` +
+                  (d.error ? `Error: ${d.error}` : 'Sin errores'),
+              );
+            }}
+            activeOpacity={0.85}
+          >
+            <Activity size={16} color={COLORS.primary} />
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
           style={styles.addBtn}
           onPress={() => router.push('/gasto-form')}
@@ -376,6 +399,16 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   addBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
+  diagBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   scroll: { padding: 16, paddingBottom: 40 },
   summary: {
     flexDirection: 'row',

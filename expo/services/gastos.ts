@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+import * as Crypto from 'expo-crypto';
 import { Gasto } from '@/types';
 import { supabase, SUPABASE_ENABLED, SUPABASE_URL, SUPABASE_ANON_KEY, GASTOS_BUCKET } from '@/services/supabase';
 
@@ -96,23 +97,20 @@ export const gastosService = {
 
   async add(g: Gasto): Promise<Gasto> {
     if (SUPABASE_ENABLED && supabase) {
-      try {
-        const { data, error } = await supabase
-          .from('gastos')
-          .insert(g)
-          .select()
-          .single();
-        if (error) {
-          console.log('[gastos] add error, fallback local', error.message);
-        } else if (data) {
-          const all = await readLocal();
-          all.unshift(data as Gasto);
-          await writeLocal(all);
-          return data as Gasto;
-        }
-      } catch (e) {
-        console.log('[gastos] add exception', e);
+      const { data, error } = await supabase
+        .from('gastos')
+        .insert(g)
+        .select()
+        .single();
+      if (error) {
+        console.log('[gastos] add error (NO fallback)', error.message);
+        throw new Error(`Supabase: ${error.message}`);
       }
+      const saved = (data ?? g) as Gasto;
+      const all = await readLocal();
+      all.unshift(saved);
+      await writeLocal(all);
+      return saved;
     }
     const all = await readLocal();
     all.unshift(g);
@@ -122,14 +120,13 @@ export const gastosService = {
 
   async updateEstado(id: string, estado: Gasto['estado']): Promise<void> {
     if (SUPABASE_ENABLED && supabase) {
-      try {
-        const { error } = await supabase
-          .from('gastos')
-          .update({ estado })
-          .eq('id', id);
-        if (error) console.log('[gastos] update estado error', error.message);
-      } catch (e) {
-        console.log('[gastos] update exception', e);
+      const { error } = await supabase
+        .from('gastos')
+        .update({ estado })
+        .eq('id', id);
+      if (error) {
+        console.log('[gastos] update estado error', error.message);
+        throw new Error(`Supabase: ${error.message}`);
       }
     }
     const all = await readLocal();
@@ -189,7 +186,7 @@ export const gastosService = {
     }
     try {
       const testGasto = {
-        id: `diag-${Date.now()}`,
+        id: Crypto.randomUUID(),
         trabajador_id: 'diag-trab',
         trabajador_nombre: 'Diagnóstico',
         fecha_gasto: new Date().toISOString().slice(0, 10),
