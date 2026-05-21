@@ -139,13 +139,18 @@ export default function ForgotPasswordScreen(): React.ReactElement {
         codigoRef.current = codigo;
         codigoExpiraRef.current = Date.now() + CODE_TTL_MS;
         const nombre = `${t.nombres} ${t.apellidos}`.trim();
-        const ok = await sendVerificationCode({ toEmail: email, nombre, codigo });
-        if (!ok) {
+        const result = await sendVerificationCode({ toEmail: email, nombre, codigo });
+        if (!result.ok) {
           codigoRef.current = null;
           codigoExpiraRef.current = 0;
+          const detalle =
+            result.error && result.error.length > 0
+              ? `\n\nDetalle: ${result.error}`
+              : '';
+          const status = result.status ? ` (HTTP ${result.status})` : '';
           Alert.alert(
-            'No pudimos enviar el correo',
-            'Revisa tu conexión o vuelve a intentarlo en unos minutos.',
+            `No pudimos enviar el correo${status}`,
+            `Posibles causas:\n• En tu cuenta de EmailJS, activa "Allow EmailJS API for non-browser applications" (Account → Security).\n• Verifica Service ID, Template ID y Public Key.\n• El template debe usar las variables {{reset_code}}, {{to_name}}, {{name}}, {{to_email}}.${detalle}`,
           );
           return;
         }

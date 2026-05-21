@@ -21,42 +21,60 @@ export interface SendCodeParams {
   codigo: string;
 }
 
+export interface SendCodeResult {
+  ok: boolean;
+  status?: number;
+  error?: string;
+}
+
 /**
  * Envía un correo con el código de verificación.
- * Devuelve true si EmailJS responde 200 OK, false en cualquier otro caso.
+ * Devuelve { ok, status, error } para poder mostrar el error real al usuario.
  */
-export async function sendVerificationCode(params: SendCodeParams): Promise<boolean> {
+export async function sendVerificationCode(params: SendCodeParams): Promise<SendCodeResult> {
   if (!EMAILJS_ENABLED) {
-    console.log('[emailjs] deshabilitado: faltan credenciales');
-    return false;
+    console.log('[emailjs] deshabilitado: faltan credenciales', {
+      hasService: SERVICE_ID.length > 0,
+      hasTemplate: TEMPLATE_ID.length > 0,
+      hasKey: PUBLIC_KEY.length > 0,
+    });
+    return { ok: false, error: 'Credenciales de EmailJS no configuradas' };
   }
+  const body = {
+    service_id: SERVICE_ID,
+    template_id: TEMPLATE_ID,
+    user_id: PUBLIC_KEY,
+    template_params: {
+      reset_code: params.codigo,
+      to_name: params.nombre,
+      name: params.nombre,
+      to_email: params.toEmail,
+      email: params.toEmail,
+      reply_to: params.toEmail,
+    },
+  };
+  console.log('[emailjs] enviando a', params.toEmail, {
+    service: SERVICE_ID,
+    template: TEMPLATE_ID,
+    keyPrefix: PUBLIC_KEY.slice(0, 4),
+  });
   try {
-    const body = {
-      service_id: SERVICE_ID,
-      template_id: TEMPLATE_ID,
-      user_id: PUBLIC_KEY,
-      template_params: {
-        reset_code: params.codigo,
-        to_name: params.nombre,
-        name: params.nombre,
-        to_email: params.toEmail,
-      },
-    };
     const res = await fetch(ENDPOINT, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', origin: 'http://localhost' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
+    const txt = await res.text().catch(() => '');
     if (!res.ok) {
-      const txt = await res.text().catch(() => '');
-      console.log('[emailjs] error status=', res.status, txt);
-      return false;
+      console.log('[emailjs] error status=', res.status, 'body=', txt);
+      return { ok: false, status: res.status, error: txt || `HTTP ${res.status}` };
     }
-    console.log('[emailjs] correo enviado ok a', params.toEmail);
-    return true;
+    console.log('[emailjs] OK status=', res.status, 'body=', txt);
+    return { ok: true, status: res.status };
   } catch (e) {
-    console.log('[emailjs] excepción', e);
-    return false;
+    const msg = e instanceof Error ? e.message : String(e);
+    console.log('[emailjs] excepción', msg);
+    return { ok: false, error: msg };
   }
 }
 
