@@ -145,6 +145,7 @@ function mapSupabaseTrabajador(row: Record<string, unknown>): Trabajador {
     supervisor_id: (row.supervisor_id as string | null) ?? null,
     ultimo_login: (row.ultimo_login as string | null) ?? (row.last_login as string | null) ?? null,
     rol: ((row.rol as Trabajador['rol']) ?? (row.role as Trabajador['rol']) ?? 'trabajador'),
+    email: pickString(row, ['email', 'correo', 'mail', 'email_address']),
   };
 }
 
