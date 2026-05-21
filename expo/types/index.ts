@@ -124,6 +124,7 @@ export interface Gasto {
   id: string;
   trabajador_id: string;
   trabajador_nombre: string;
+  empresa_id?: string | null;
   fecha_gasto: string;
   monto: number;
   moneda: string;

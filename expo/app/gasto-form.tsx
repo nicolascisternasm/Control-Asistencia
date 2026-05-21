@@ -298,6 +298,7 @@ Si un dato no se ve claro, déjalo vacío ("") o 0. NO inventes datos.`;
       id: Crypto.randomUUID(),
       trabajador_id: trabajador.id,
       trabajador_nombre: `${trabajador.nombres} ${trabajador.apellidos}`,
+      empresa_id: trabajador.empresa ?? null,
       fecha_gasto: fecha,
       monto: Math.round(montoNum),
       moneda: 'CLP',

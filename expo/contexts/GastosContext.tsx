@@ -9,11 +9,13 @@ export const [GastosProvider, useGastos] = createContextHook(() => {
   const { trabajador, isAdmin } = useAuth();
   const qc = useQueryClient();
   const trabajadorId = trabajador?.id;
+  const empresaId = trabajador?.empresa ?? undefined;
   const scopeId = isAdmin ? undefined : trabajadorId;
+  const empresaScope = isAdmin ? empresaId : undefined;
 
   const gastosQuery = useQuery({
-    queryKey: ['gastos', scopeId ?? 'all'],
-    queryFn: async () => gastosService.list(scopeId),
+    queryKey: ['gastos', scopeId ?? 'all', empresaScope ?? 'any'],
+    queryFn: async () => gastosService.list(scopeId, empresaScope),
     enabled: !!trabajador,
   });
 

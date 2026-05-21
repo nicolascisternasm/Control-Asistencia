@@ -72,16 +72,16 @@ export const gastosService = {
     }
   },
 
-  async list(trabajadorId?: string): Promise<Gasto[]> {
+  async list(trabajadorId?: string, empresaId?: string): Promise<Gasto[]> {
     if (SUPABASE_ENABLED && supabase) {
       try {
-        const q = supabase
+        let q = supabase
           .from('gastos')
           .select('*')
           .order('creado_en', { ascending: false });
-        const { data, error } = trabajadorId
-          ? await q.eq('trabajador_id', trabajadorId)
-          : await q;
+        if (trabajadorId) q = q.eq('trabajador_id', trabajadorId);
+        if (empresaId) q = q.eq('empresa_id', empresaId);
+        const { data, error } = await q;
         if (error) {
           console.log('[gastos] list error, fallback local', error.message);
         } else if (data) {
@@ -92,7 +92,11 @@ export const gastosService = {
       }
     }
     const all = await readLocal();
-    return trabajadorId ? all.filter((g) => g.trabajador_id === trabajadorId) : all;
+    return all.filter((g) => {
+      if (trabajadorId && g.trabajador_id !== trabajadorId) return false;
+      if (empresaId && (g.empresa_id ?? '') !== empresaId) return false;
+      return true;
+    });
   },
 
   async add(g: Gasto): Promise<Gasto> {
