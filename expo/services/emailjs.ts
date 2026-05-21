@@ -3,7 +3,7 @@
 // ------------------------------------------------------------
 // Usa la API REST de EmailJS para enviar correos desde el cliente.
 // Las credenciales se inyectan vía variables EXPO_PUBLIC_*.
-// El template debe definir las variables {{codigo}}, {{nombre}} y {{to_email}}.
+// El template debe definir las variables {{reset_code}}, {{to_name}}, {{name}} y {{to_email}}.
 // ============================================================
 
 const SERVICE_ID = process.env.EXPO_PUBLIC_EMAILJS_SERVICE_ID ?? '';
@@ -36,10 +36,10 @@ export async function sendVerificationCode(params: SendCodeParams): Promise<bool
       template_id: TEMPLATE_ID,
       user_id: PUBLIC_KEY,
       template_params: {
-        codigo: params.codigo,
-        nombre: params.nombre,
+        reset_code: params.codigo,
+        to_name: params.nombre,
+        name: params.nombre,
         to_email: params.toEmail,
-        email: params.toEmail,
       },
     };
     const res = await fetch(ENDPOINT, {
