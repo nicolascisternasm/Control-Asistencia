@@ -28,6 +28,8 @@ import {
   Eye,
   EyeOff,
   KeyRound,
+  Mail,
+  Calendar,
 } from 'lucide-react-native';
 import { COLORS, HorarioTrabajador, HORARIO_DEFAULT, PuntoTrabajo, Trabajador } from '@/types';
 import { Clock3, Timer } from 'lucide-react-native';
@@ -45,7 +47,7 @@ const ROLES: { key: Rol; label: string }[] = [
 
 export default function TrabajadorFormScreen(): React.ReactElement {
   const router = useRouter();
-  const { id } = useLocalSearchParams<{ id?: string }>();
+  const { id, empresa: empresaParam } = useLocalSearchParams<{ id?: string; empresa?: string }>();
   const isEdit = !!id;
 
   const [loading, setLoading] = useState<boolean>(isEdit);
@@ -56,7 +58,9 @@ export default function TrabajadorFormScreen(): React.ReactElement {
   const [apellidos, setApellidos] = useState<string>('');
   const [telefono, setTelefono] = useState<string>('');
   const [cargo, setCargo] = useState<string>('');
-  const [empresa, setEmpresa] = useState<string>('');
+  const [empresa, setEmpresa] = useState<string>(empresaParam ?? '');
+  const [email, setEmail] = useState<string>('');
+  const [fechaIngreso, setFechaIngreso] = useState<string>('');
   const [rol, setRol] = useState<Rol>('trabajador');
   const [activo, setActivo] = useState<boolean>(true);
   const [password, setPassword] = useState<string>('');
@@ -80,6 +84,8 @@ export default function TrabajadorFormScreen(): React.ReactElement {
           setTelefono(t.telefono);
           setCargo(t.cargo);
           setEmpresa(t.empresa);
+          setEmail(t.email ?? '');
+          setFechaIngreso(t.fecha_ingreso ?? '');
           setRol(t.rol);
           setActivo(t.activo);
           setHorario(t.horario ?? HORARIO_DEFAULT);
@@ -121,6 +127,16 @@ export default function TrabajadorFormScreen(): React.ReactElement {
         return;
       }
     }
+    const emailTrim = email.trim();
+    if (emailTrim && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrim)) {
+      Alert.alert('Email inválido', 'Revisa el correo ingresado');
+      return;
+    }
+    const fechaTrim = fechaIngreso.trim();
+    if (fechaTrim && !/^\d{4}-\d{2}-\d{2}$/.test(fechaTrim)) {
+      Alert.alert('Fecha inválida', 'Usa el formato AAAA-MM-DD (ej: 2024-03-15)');
+      return;
+    }
     setSaving(true);
     try {
       let trabajadorId: string;
@@ -132,18 +148,20 @@ export default function TrabajadorFormScreen(): React.ReactElement {
           telefono: telefono.trim(),
           cargo: cargo.trim(),
           empresa: empresa.trim() || 'Sin empresa',
+          email: emailTrim || undefined,
+          fecha_ingreso: fechaTrim || null,
           rol,
           activo,
           horario,
         });
         if (resetPass) {
           await repo.setPassword(cleanRut(rut), password);
+          await repo.resetPasswordRemote(cleanRut(rut), password);
         }
         trabajadorId = id as string;
       } else {
-        trabajadorId = `t-${Date.now()}`;
         const nuevo: Trabajador = {
-          id: trabajadorId,
+          id: '',
           rut: formatRut(rut),
           nombres: nombres.trim(),
           apellidos: apellidos.trim(),
@@ -151,12 +169,15 @@ export default function TrabajadorFormScreen(): React.ReactElement {
           activo,
           cargo: cargo.trim(),
           empresa: empresa.trim() || 'Sin empresa',
+          email: emailTrim || undefined,
+          fecha_ingreso: fechaTrim || null,
           supervisor_id: null,
           ultimo_login: null,
           rol,
           horario,
         };
-        await repo.addTrabajador(nuevo);
+        const created = await repo.addTrabajador(nuevo);
+        trabajadorId = created.id;
         await repo.setPassword(cleanRut(rut), password);
       }
       await repo.setAsignacionTrabajador(trabajadorId, puntoTrabajoId);
@@ -167,7 +188,7 @@ export default function TrabajadorFormScreen(): React.ReactElement {
     } finally {
       setSaving(false);
     }
-  }, [isEdit, id, rut, nombres, apellidos, telefono, cargo, empresa, rol, activo, router, password, password2, resetPass, puntoTrabajoId, horario]);
+  }, [isEdit, id, rut, nombres, apellidos, telefono, cargo, empresa, email, fechaIngreso, rol, activo, router, password, password2, resetPass, puntoTrabajoId, horario]);
 
   const eliminar = useCallback(() => {
     if (!isEdit) return;
@@ -283,6 +304,22 @@ export default function TrabajadorFormScreen(): React.ReactElement {
                 testID="input-telefono"
               />
             </View>
+
+            <Text style={styles.label}>Correo electrónico</Text>
+            <View style={styles.input}>
+              <Mail size={18} color={COLORS.textMuted} />
+              <TextInput
+                value={email}
+                onChangeText={setEmail}
+                placeholder="nombre@empresa.cl"
+                placeholderTextColor={COLORS.textMuted}
+                style={styles.inputText}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                testID="input-email"
+              />
+            </View>
           </View>
 
           <View style={styles.card}>
@@ -311,6 +348,20 @@ export default function TrabajadorFormScreen(): React.ReactElement {
                 placeholderTextColor={COLORS.textMuted}
                 style={styles.inputText}
                 testID="input-empresa"
+              />
+            </View>
+
+            <Text style={styles.label}>Fecha de ingreso</Text>
+            <View style={styles.input}>
+              <Calendar size={18} color={COLORS.textMuted} />
+              <TextInput
+                value={fechaIngreso}
+                onChangeText={setFechaIngreso}
+                placeholder="AAAA-MM-DD"
+                placeholderTextColor={COLORS.textMuted}
+                style={styles.inputText}
+                autoCapitalize="none"
+                testID="input-fecha-ingreso"
               />
             </View>
 

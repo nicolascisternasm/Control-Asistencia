@@ -29,6 +29,7 @@ import {
   TIPO_MARCACION_LABEL,
 } from '@/types';
 import { repo } from '@/services/repository';
+import { useAuth } from '@/contexts/AuthContext';
 import { formatRut } from '@/utils/rut';
 
 type Filtro = 'todos' | 'marcaron' | 'faltan';
@@ -41,6 +42,8 @@ interface EstadoTrabajador {
 }
 
 export default function AsistenciaHoyScreen(): React.ReactElement {
+  const { trabajador: adminUser } = useAuth();
+  const empresaAdmin = adminUser?.empresa ?? '';
   const [trabajadores, setTrabajadores] = useState<Trabajador[]>([]);
   const [marcaciones, setMarcaciones] = useState<Marcacion[]>([]);
   const [puntos, setPuntos] = useState<PuntoTrabajo[]>([]);
@@ -54,7 +57,7 @@ export default function AsistenciaHoyScreen(): React.ReactElement {
   const load = useCallback(async () => {
     setRefreshing(true);
     const [t, m, p] = await Promise.all([
-      repo.getAllTrabajadores(),
+      repo.getAllTrabajadores(empresaAdmin),
       repo.getMarcaciones(),
       repo.getPuntosTrabajo(),
     ]);
@@ -70,7 +73,7 @@ export default function AsistenciaHoyScreen(): React.ReactElement {
     setPuntos(p);
     setAsignaciones(asigns);
     setRefreshing(false);
-  }, []);
+  }, [empresaAdmin]);
 
   useEffect(() => {
     load();

@@ -37,6 +37,7 @@ import {
   Trabajador,
 } from '@/types';
 import { repo } from '@/services/repository';
+import { useAuth } from '@/contexts/AuthContext';
 import { useVacaciones } from '@/contexts/VacacionesContext';
 import { useToast } from '@/contexts/ToastContext';
 import { formatRut } from '@/utils/rut';
@@ -45,6 +46,8 @@ import { generateRandomPassword } from '@/utils/crypto';
 export default function AdminScreen(): React.ReactElement {
   const router = useRouter();
   const { showToast } = useToast();
+  const { trabajador: adminUser } = useAuth();
+  const empresaAdmin = adminUser?.empresa ?? '';
   const { solicitudes: vacSolicitudes, recargar: recargarVac } = useVacaciones();
   const vacPendientes = useMemo(
     () => vacSolicitudes.filter((s) => s.estado === 'pendiente'),
@@ -62,7 +65,7 @@ export default function AdminScreen(): React.ReactElement {
   const load = useCallback(async () => {
     setRefreshing(true);
     const [t, s, m, sc] = await Promise.all([
-      repo.getAllTrabajadores(),
+      repo.getAllTrabajadores(empresaAdmin),
       repo.getSolicitudes(),
       repo.getMarcaciones(),
       repo.getSolicitudesOmitirColacion(),
@@ -78,7 +81,7 @@ export default function AdminScreen(): React.ReactElement {
     );
     await recargarVac();
     setRefreshing(false);
-  }, [recargarVac]);
+  }, [recargarVac, empresaAdmin]);
 
   useEffect(() => {
     load();
@@ -180,7 +183,9 @@ export default function AdminScreen(): React.ReactElement {
           <Shield size={22} color={COLORS.primary} />
           <Text style={styles.title}>Panel Admin</Text>
         </View>
-        <Text style={styles.subtitle}>Gestión de equipo y solicitudes</Text>
+        <Text style={styles.subtitle}>
+          {empresaAdmin ? `${empresaAdmin} · Gestión de equipo` : 'Gestión de equipo y solicitudes'}
+        </Text>
       </View>
 
       <ScrollView
@@ -410,7 +415,7 @@ export default function AdminScreen(): React.ReactElement {
           <Text style={styles.section}>Equipo ({trabajadores.length})</Text>
           <TouchableOpacity
             style={styles.addBtn}
-            onPress={() => router.push('/trabajador-form')}
+            onPress={() => router.push({ pathname: '/trabajador-form', params: { empresa: empresaAdmin } })}
             activeOpacity={0.85}
             testID="btn-add-trabajador"
           >

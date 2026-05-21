@@ -58,6 +58,7 @@ export interface Trabajador {
   ultimo_login: string | null;
   rol: 'trabajador' | 'supervisor' | 'admin';
   email?: string;
+  fecha_ingreso?: string | null;
   horario?: HorarioTrabajador;
 }
 

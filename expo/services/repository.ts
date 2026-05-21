@@ -146,7 +146,61 @@ function mapSupabaseTrabajador(row: Record<string, unknown>): Trabajador {
     ultimo_login: (row.ultimo_login as string | null) ?? (row.last_login as string | null) ?? null,
     rol: ((row.rol as Trabajador['rol']) ?? (row.role as Trabajador['rol']) ?? 'trabajador'),
     email: pickString(row, ['email', 'correo', 'mail', 'email_address']),
+    fecha_ingreso:
+      (row.fecha_ingreso as string | null) ??
+      (row.fecha_contratacion as string | null) ??
+      (row.hire_date as string | null) ??
+      null,
   };
+}
+
+/** Quita acentos y baja a min para comparar nombres de empresa de forma tolerante. */
+function normalizeEmpresa(s: string): string {
+  return s
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+/** Construye el payload que se envía a la tabla `usuarios` en Supabase. */
+function trabajadorToRow(t: Partial<Trabajador>): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  if (t.rut !== undefined) row.rut = t.rut;
+  if (t.nombres !== undefined) row.nombres = t.nombres;
+  if (t.apellidos !== undefined) row.apellidos = t.apellidos;
+  if (t.telefono !== undefined) row.telefono = t.telefono;
+  if (t.activo !== undefined) row.activo = t.activo;
+  if (t.cargo !== undefined) row.cargo = t.cargo;
+  if (t.empresa !== undefined) row.empresa = t.empresa;
+  if (t.rol !== undefined) row.rol = t.rol;
+  if (t.email !== undefined) row.email = t.email;
+  if (t.fecha_ingreso !== undefined) row.fecha_ingreso = t.fecha_ingreso;
+  if (t.supervisor_id !== undefined) row.supervisor_id = t.supervisor_id;
+  return row;
+}
+
+async function fetchAllTrabajadoresFromSupabase(empresa?: string): Promise<Trabajador[] | null> {
+  if (!SUPABASE_ENABLED || !supabase) return null;
+  try {
+    const { data, error } = await supabase
+      .from(USUARIOS_TABLE)
+      .select('*')
+      .limit(2000);
+    if (error || !data) {
+      console.log('[repo] supabase getAllTrabajadores error', error?.message);
+      return null;
+    }
+    const all = (data as Record<string, unknown>[]).map(mapSupabaseTrabajador);
+    if (!empresa || !empresa.trim()) return all;
+    const target = normalizeEmpresa(empresa);
+    const filtered = all.filter((t) => normalizeEmpresa(t.empresa ?? '') === target);
+    console.log('[repo] trabajadores filtrados por empresa', { empresa, total: all.length, match: filtered.length });
+    return filtered;
+  } catch (e) {
+    console.log('[repo] supabase getAllTrabajadores exception', e);
+    return null;
+  }
 }
 
 /**
@@ -236,24 +290,77 @@ export const repo = {
     return all.find((t) => cleanRut(t.rut) === target) ?? null;
   },
 
-  async getAllTrabajadores(): Promise<Trabajador[]> {
-    return await ensureTrabajadoresSeeded();
+  async getAllTrabajadores(empresa?: string): Promise<Trabajador[]> {
+    // Fuente de verdad: tabla `usuarios` en Supabase. Si se entrega `empresa`,
+    // sólo devolvemos los usuarios que pertenecen a la misma empresa del admin.
+    if (SUPABASE_ENABLED) {
+      const remote = await fetchAllTrabajadoresFromSupabase(empresa);
+      if (remote) {
+        await writeJson(KEYS.trabajadores, remote);
+        return remote;
+      }
+    }
+    const all = await ensureTrabajadoresSeeded();
+    if (!empresa || !empresa.trim()) return all;
+    const target = normalizeEmpresa(empresa);
+    return all.filter((t) => normalizeEmpresa(t.empresa ?? '') === target);
   },
 
   async getTrabajadorById(id: string): Promise<Trabajador | null> {
+    if (SUPABASE_ENABLED && supabase) {
+      try {
+        const { data, error } = await supabase
+          .from(USUARIOS_TABLE)
+          .select('*')
+          .eq('id', id)
+          .maybeSingle();
+        if (!error && data) {
+          return mapSupabaseTrabajador(data as Record<string, unknown>);
+        }
+      } catch (e) {
+        console.log('[repo] getTrabajadorById supabase exception', e);
+      }
+    }
     const all = await ensureTrabajadoresSeeded();
     return all.find((t) => t.id === id) ?? null;
   },
 
-  async addTrabajador(t: Trabajador): Promise<void> {
+  async addTrabajador(t: Trabajador): Promise<Trabajador> {
+    if (SUPABASE_ENABLED && supabase) {
+      const row = trabajadorToRow(t);
+      // No mandamos `id` si la tabla lo autogenera; si viene con prefijo lo respetamos.
+      if (t.id && !t.id.startsWith('t-')) row.id = t.id;
+      const { data, error } = await supabase
+        .from(USUARIOS_TABLE)
+        .insert(row)
+        .select('*')
+        .maybeSingle();
+      if (error) {
+        throw new Error(`Supabase: ${error.message}`);
+      }
+      const created = data ? mapSupabaseTrabajador(data as Record<string, unknown>) : { ...t };
+      return created;
+    }
     const all = await ensureTrabajadoresSeeded();
     const exists = all.find((x) => cleanRut(x.rut) === cleanRut(t.rut));
     if (exists) throw new Error('Ya existe un trabajador con ese RUT');
     all.push(t);
     await writeJson(KEYS.trabajadores, all);
+    return t;
   },
 
   async updateTrabajador(id: string, patch: Partial<Trabajador>): Promise<void> {
+    if (SUPABASE_ENABLED && supabase) {
+      const row = trabajadorToRow(patch);
+      const { error } = await supabase
+        .from(USUARIOS_TABLE)
+        .update(row)
+        .eq('id', id);
+      if (error) {
+        throw new Error(`Supabase: ${error.message}`);
+      }
+      return;
+    }
     const all = await ensureTrabajadoresSeeded();
     const idx = all.findIndex((x) => x.id === id);
     if (idx < 0) throw new Error('Trabajador no encontrado');
@@ -268,6 +375,11 @@ export const repo = {
   },
 
   async deleteTrabajador(id: string): Promise<void> {
+    if (SUPABASE_ENABLED && supabase) {
+      const { error } = await supabase.from(USUARIOS_TABLE).delete().eq('id', id);
+      if (error) throw new Error(`Supabase: ${error.message}`);
+      return;
+    }
     const all = await ensureTrabajadoresSeeded();
     const next = all.filter((x) => x.id !== id);
     await writeJson(KEYS.trabajadores, next);
