@@ -7,11 +7,7 @@ import {
   TouchableOpacity,
   Alert,
   Switch,
-  Modal,
-  TextInput,
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -29,8 +25,6 @@ import {
   Calendar,
   KeyRound,
   Lock,
-  X,
-  Check,
   RefreshCw,
 } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
@@ -42,14 +36,14 @@ import { formatRut } from '@/utils/rut';
 
 export default function ProfileScreen(): React.ReactElement {
   const router = useRouter();
-  const { trabajador, logout, isAdmin, refreshTrabajador, changePassword } = useAuth();
+  const { trabajador, logout, isAdmin, refreshTrabajador, solicitarResetPassword } = useAuth();
   const { puntoAsignado, marcaciones } = useMarcaciones();
   const { solicitudes: vacSolicitudes } = useVacaciones();
   const vacPendientes = vacSolicitudes.filter((s) => s.estado === 'pendiente').length;
   const [notifs, setNotifs] = useState<boolean>(true);
   const [recordatorio, setRecordatorio] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
-  const [pwdVisible, setPwdVisible] = useState<boolean>(false);
+  const [requestingPwd, setRequestingPwd] = useState<boolean>(false);
 
   useEffect(() => {
     refreshTrabajador().catch(() => {});
@@ -69,6 +63,36 @@ export default function ProfileScreen(): React.ReactElement {
       { text: 'Cancelar', style: 'cancel' },
       { text: 'Salir', style: 'destructive', onPress: () => logout() },
     ]);
+  };
+
+  const confirmRequestPassword = () => {
+    Alert.alert(
+      'Solicitar nueva contraseña',
+      'Se enviará una notificación al administrador para que genere y te entregue una nueva contraseña. ¿Continuar?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Solicitar',
+          onPress: async () => {
+            setRequestingPwd(true);
+            try {
+              const sent = await solicitarResetPassword();
+              Alert.alert(
+                'Solicitud enviada',
+                sent
+                  ? 'Tu administrador recibirá la notificación y se contactará contigo.'
+                  : 'La solicitud quedó registrada localmente. Contáctate con tu administrador.',
+              );
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : 'No se pudo enviar';
+              Alert.alert('Error', msg);
+            } finally {
+              setRequestingPwd(false);
+            }
+          },
+        },
+      ],
+    );
   };
 
   const iniciales =
@@ -150,18 +174,25 @@ export default function ProfileScreen(): React.ReactElement {
         <Text style={styles.section}>Seguridad</Text>
         <TouchableOpacity
           style={styles.actionRow}
-          onPress={() => setPwdVisible(true)}
+          onPress={confirmRequestPassword}
+          disabled={requestingPwd}
           activeOpacity={0.85}
-          testID="btn-cambiar-password"
+          testID="btn-solicitar-password"
         >
           <View style={styles.actionIcon}>
             <KeyRound size={18} color={COLORS.primary} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.actionTitle}>Cambiar contraseña</Text>
-            <Text style={styles.actionSub}>Actualiza tu clave de acceso</Text>
+            <Text style={styles.actionTitle}>Solicitar nueva contraseña</Text>
+            <Text style={styles.actionSub}>
+              El administrador recibirá la notificación y te entregará una nueva
+            </Text>
           </View>
-          <ChevronRight size={18} color={COLORS.textMuted} />
+          {requestingPwd ? (
+            <ActivityIndicator size="small" color={COLORS.primary} />
+          ) : (
+            <ChevronRight size={18} color={COLORS.textMuted} />
+          )}
         </TouchableOpacity>
 
         {!isAdmin && (
@@ -247,14 +278,6 @@ export default function ProfileScreen(): React.ReactElement {
         <Text style={styles.version}>ControlAsistencia v1.0</Text>
       </ScrollView>
 
-      <ChangePasswordModal
-        visible={pwdVisible}
-        onClose={() => setPwdVisible(false)}
-        onSave={async (newPassword) => {
-          const remote = await changePassword(newPassword);
-          return remote;
-        }}
-      />
     </SafeAreaView>
   );
 }
@@ -301,143 +324,6 @@ function PrefRow({
         onValueChange={onChange}
         trackColor={{ false: COLORS.border, true: COLORS.primary }}
         thumbColor="#FFFFFF"
-      />
-    </View>
-  );
-}
-
-function ChangePasswordModal({
-  visible,
-  onClose,
-  onSave,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  onSave: (newPassword: string) => Promise<boolean>;
-}): React.ReactElement {
-  const [pwd, setPwd] = useState<string>('');
-  const [pwd2, setPwd2] = useState<string>('');
-  const [saving, setSaving] = useState<boolean>(false);
-
-  useEffect(() => {
-    if (visible) {
-      setPwd('');
-      setPwd2('');
-    }
-  }, [visible]);
-
-  const handleSave = async () => {
-    if (pwd.length < 6) {
-      Alert.alert('Contraseña muy corta', 'Debe tener al menos 6 caracteres.');
-      return;
-    }
-    if (pwd !== pwd2) {
-      Alert.alert('Las contraseñas no coinciden', 'Verifica que ambos campos sean iguales.');
-      return;
-    }
-    setSaving(true);
-    try {
-      const remote = await onSave(pwd);
-      Alert.alert(
-        'Contraseña actualizada',
-        remote
-          ? 'Tu nueva contraseña ya está activa.'
-          : 'Se guardó localmente, pero no pudo sincronizarse con el servidor.',
-      );
-      onClose();
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Error desconocido';
-      Alert.alert('No se pudo cambiar', msg);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      <SafeAreaView style={styles.screen} edges={['top']}>
-        <View style={styles.modalHeader}>
-          <TouchableOpacity onPress={onClose} style={styles.modalIconBtn}>
-            <X size={22} color={COLORS.text} />
-          </TouchableOpacity>
-          <Text style={styles.modalTitle}>Cambiar contraseña</Text>
-          <TouchableOpacity
-            onPress={handleSave}
-            style={[styles.modalSaveBtn, saving && { opacity: 0.5 }]}
-            disabled={saving}
-            testID="btn-guardar-password"
-          >
-            {saving ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <>
-                <Check size={16} color="#FFFFFF" />
-                <Text style={styles.modalSaveTxt}>Guardar</Text>
-              </>
-            )}
-          </TouchableOpacity>
-        </View>
-
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={{ flex: 1 }}
-        >
-          <ScrollView contentContainerStyle={{ padding: 16 }}>
-            <Field
-              label="Nueva contraseña"
-              value={pwd}
-              onChangeText={setPwd}
-              placeholder="Mínimo 6 caracteres"
-              secureTextEntry
-              autoCapitalize="none"
-            />
-            <Field
-              label="Repetir contraseña"
-              value={pwd2}
-              onChangeText={setPwd2}
-              placeholder="Repite la contraseña"
-              secureTextEntry
-              autoCapitalize="none"
-            />
-            <Text style={styles.helpText}>
-              La nueva contraseña reemplaza a la anterior en todos los dispositivos y en el ERP.
-            </Text>
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </SafeAreaView>
-    </Modal>
-  );
-}
-
-function Field({
-  label,
-  value,
-  onChangeText,
-  placeholder,
-  keyboardType,
-  autoCapitalize,
-  secureTextEntry,
-}: {
-  label: string;
-  value: string;
-  onChangeText: (v: string) => void;
-  placeholder?: string;
-  keyboardType?: 'default' | 'email-address' | 'phone-pad' | 'numeric';
-  autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
-  secureTextEntry?: boolean;
-}): React.ReactElement {
-  return (
-    <View style={styles.field}>
-      <Text style={styles.fieldLbl}>{label}</Text>
-      <TextInput
-        style={styles.fieldInput}
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor={COLORS.textMuted}
-        keyboardType={keyboardType ?? 'default'}
-        autoCapitalize={autoCapitalize ?? 'sentences'}
-        secureTextEntry={secureTextEntry ?? false}
       />
     </View>
   );

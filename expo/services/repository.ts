@@ -685,6 +685,49 @@ export const repo = {
     await marcacionesService.add(m);
   },
 
+  /**
+   * Inserta una solicitud de reseteo de contraseña para que el admin la vea
+   * desde el ERP (notificación). Persiste en la tabla `solicitudes_password`
+   * en Supabase y deja una copia local como respaldo.
+   */
+  async solicitarResetPassword(
+    trabajador: Trabajador,
+    comentario: string,
+  ): Promise<boolean> {
+    const solicitud: SolicitudPassword = {
+      id: `pwd-${Date.now()}`,
+      trabajador_id: trabajador.id,
+      rut: trabajador.rut,
+      telefono: trabajador.telefono ?? '',
+      estado: 'pendiente',
+      fecha_solicitud: new Date().toISOString(),
+      fecha_resolucion: null,
+      resuelto_por: null,
+      comentario: comentario.trim(),
+    };
+
+    let syncedRemote = false;
+    if (SUPABASE_ENABLED && supabase) {
+      try {
+        const { error } = await supabase
+          .from('solicitudes_password')
+          .insert(solicitud);
+        if (error) {
+          console.log('[repo] solicitarResetPassword insert error', error.message);
+        } else {
+          syncedRemote = true;
+        }
+      } catch (e) {
+        console.log('[repo] solicitarResetPassword exception', e);
+      }
+    }
+
+    const all = await readJson<SolicitudPassword[]>(KEYS.solicitudes, []);
+    all.unshift(solicitud);
+    await writeJson(KEYS.solicitudes, all);
+    return syncedRemote;
+  },
+
   async getSolicitudes(): Promise<SolicitudPassword[]> {
     return await readJson<SolicitudPassword[]>(KEYS.solicitudes, []);
   },

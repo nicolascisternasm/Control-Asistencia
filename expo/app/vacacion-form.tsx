@@ -15,11 +15,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Stack } from 'expo-router';
 import {
   ArrowLeft,
-  CalendarDays,
   Send,
   AlertCircle,
   CheckCircle2,
   Plane,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react-native';
 import { COLORS } from '@/types';
 import {
@@ -27,13 +28,19 @@ import {
   validarSolicitudVacaciones,
   MIN_DIAS_ANTICIPACION,
 } from '@/contexts/VacacionesContext';
-import { formatFechaLarga, toISODate } from '@/utils/fecha';
+import { formatFechaLarga, parseFecha, startOfDay, toISODate } from '@/utils/fecha';
+
+const WEEK_LABELS = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
+const MONTH_LABELS = [
+  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
+];
 
 export default function VacacionFormScreen(): React.ReactElement {
   const router = useRouter();
   const { crear } = useVacaciones();
 
-  const hoy = useMemo(() => new Date(), []);
+  const hoy = useMemo(() => startOfDay(new Date()), []);
   const sugerida = useMemo(() => {
     const d = new Date(hoy);
     d.setDate(d.getDate() + 10);
@@ -42,13 +49,43 @@ export default function VacacionFormScreen(): React.ReactElement {
 
   const [desde, setDesde] = useState<string>(sugerida);
   const [hasta, setHasta] = useState<string>(sugerida);
-  const [motivo, setMotivoState] = useState<string>('');
+  const [motivo, setMotivo] = useState<string>('');
   const [enviando, setEnviando] = useState<boolean>(false);
+  const [monthCursor, setMonthCursor] = useState<Date>(() => {
+    const d = parseFecha(sugerida) ?? new Date(hoy);
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  });
 
   const validacion = useMemo(
     () => validarSolicitudVacaciones(desde, hasta, hoy),
     [desde, hasta, hoy],
   );
+
+  const onSelectDay = (iso: string) => {
+    const d = parseFecha(iso);
+    if (!d) return;
+    // Si no hay rango (desde == hasta) o se completó uno, esta selección
+    // se convierte en nuevo "desde". Si ya hay un "desde" sin "hasta", se
+    // elige "hasta".
+    const desdeDate = parseFecha(desde);
+    const hastaDate = parseFecha(hasta);
+    if (!desdeDate || (desdeDate && hastaDate && desde !== hasta)) {
+      setDesde(iso);
+      setHasta(iso);
+      return;
+    }
+    if (desde === hasta) {
+      if (d < desdeDate) {
+        setDesde(iso);
+        setHasta(desde);
+      } else {
+        setHasta(iso);
+      }
+      return;
+    }
+    setDesde(iso);
+    setHasta(iso);
+  };
 
   const onEnviar = async () => {
     if (!validacion.ok) {
@@ -65,6 +102,13 @@ export default function VacacionFormScreen(): React.ReactElement {
     } else {
       Alert.alert('Error', res.message);
     }
+  };
+
+  const prevMonth = () => {
+    setMonthCursor((c) => new Date(c.getFullYear(), c.getMonth() - 1, 1));
+  };
+  const nextMonth = () => {
+    setMonthCursor((c) => new Date(c.getFullYear(), c.getMonth() + 1, 1));
   };
 
   return (
@@ -97,55 +141,45 @@ export default function VacacionFormScreen(): React.ReactElement {
           contentContainerStyle={styles.scroll}
           keyboardShouldPersistTaps="handled"
         >
-          <View style={styles.card}>
-            <View style={styles.field}>
-              <View style={styles.fieldLabel}>
-                <CalendarDays size={14} color={COLORS.textSecondary} />
-                <Text style={styles.fieldLabelText}>Desde</Text>
-              </View>
-              <TextInput
-                value={desde}
-                onChangeText={setDesde}
-                placeholder="AAAA-MM-DD"
-                placeholderTextColor={COLORS.textMuted}
-                style={styles.input}
-                autoCapitalize="none"
-                autoCorrect={false}
-                testID="input-desde"
-              />
-              <Text style={styles.helper}>{formatFechaLarga(desde)}</Text>
+          <View style={styles.rangeRow}>
+            <View style={styles.rangeBox}>
+              <Text style={styles.rangeLbl}>Desde</Text>
+              <Text style={styles.rangeVal}>{formatFechaLarga(desde)}</Text>
             </View>
+            <View style={styles.rangeArrow}><ChevronRight size={18} color={COLORS.textMuted} /></View>
+            <View style={styles.rangeBox}>
+              <Text style={styles.rangeLbl}>Hasta</Text>
+              <Text style={styles.rangeVal}>{formatFechaLarga(hasta)}</Text>
+            </View>
+          </View>
 
-            <View style={styles.field}>
-              <View style={styles.fieldLabel}>
-                <CalendarDays size={14} color={COLORS.textSecondary} />
-                <Text style={styles.fieldLabelText}>Hasta</Text>
-              </View>
-              <TextInput
-                value={hasta}
-                onChangeText={setHasta}
-                placeholder="AAAA-MM-DD"
-                placeholderTextColor={COLORS.textMuted}
-                style={styles.input}
-                autoCapitalize="none"
-                autoCorrect={false}
-                testID="input-hasta"
-              />
-              <Text style={styles.helper}>{formatFechaLarga(hasta)}</Text>
-            </View>
+          <CalendarMonth
+            cursor={monthCursor}
+            desde={desde}
+            hasta={hasta}
+            hoy={hoy}
+            onPrev={prevMonth}
+            onNext={nextMonth}
+            onSelect={onSelectDay}
+          />
 
-            <View style={styles.field}>
-              <Text style={styles.fieldLabelText}>Motivo (opcional)</Text>
-              <TextInput
-                value={motivo}
-                onChangeText={setMotivoState}
-                placeholder="Ej: viaje familiar"
-                placeholderTextColor={COLORS.textMuted}
-                style={[styles.input, styles.textArea]}
-                multiline
-                testID="input-motivo"
-              />
-            </View>
+          <View style={styles.helpRow}>
+            <Text style={styles.helpText}>
+              Toca el primer día y luego el último para definir el rango de vacaciones.
+            </Text>
+          </View>
+
+          <View style={styles.field}>
+            <Text style={styles.fieldLabelText}>Motivo (opcional)</Text>
+            <TextInput
+              value={motivo}
+              onChangeText={setMotivo}
+              placeholder="Ej: viaje familiar"
+              placeholderTextColor={COLORS.textMuted}
+              style={[styles.input, styles.textArea]}
+              multiline
+              testID="input-motivo"
+            />
           </View>
 
           <View style={styles.summary}>
@@ -212,6 +246,112 @@ export default function VacacionFormScreen(): React.ReactElement {
   );
 }
 
+function CalendarMonth({
+  cursor,
+  desde,
+  hasta,
+  hoy,
+  onPrev,
+  onNext,
+  onSelect,
+}: {
+  cursor: Date;
+  desde: string;
+  hasta: string;
+  hoy: Date;
+  onPrev: () => void;
+  onNext: () => void;
+  onSelect: (iso: string) => void;
+}): React.ReactElement {
+  const year = cursor.getFullYear();
+  const month = cursor.getMonth();
+  const firstDay = new Date(year, month, 1);
+  // Lunes = 0
+  const jsDow = firstDay.getDay(); // 0=Dom..6=Sab
+  const firstOffset = (jsDow + 6) % 7;
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const desdeD = parseFecha(desde);
+  const hastaD = parseFecha(hasta);
+
+  const cells: ({ iso: string; day: number } | null)[] = [];
+  for (let i = 0; i < firstOffset; i += 1) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d += 1) {
+    const date = new Date(year, month, d);
+    cells.push({ iso: toISODate(date), day: d });
+  }
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const rows: (typeof cells)[] = [];
+  for (let i = 0; i < cells.length; i += 7) {
+    rows.push(cells.slice(i, i + 7));
+  }
+
+  return (
+    <View style={styles.calCard}>
+      <View style={styles.calHeader}>
+        <TouchableOpacity onPress={onPrev} style={styles.calNavBtn} testID="btn-cal-prev">
+          <ChevronLeft size={18} color={COLORS.text} />
+        </TouchableOpacity>
+        <Text style={styles.calTitle}>
+          {MONTH_LABELS[month]} {year}
+        </Text>
+        <TouchableOpacity onPress={onNext} style={styles.calNavBtn} testID="btn-cal-next">
+          <ChevronRight size={18} color={COLORS.text} />
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.weekRow}>
+        {WEEK_LABELS.map((w, i) => (
+          <Text key={`${w}-${i}`} style={styles.weekLbl}>{w}</Text>
+        ))}
+      </View>
+
+      {rows.map((row, ri) => (
+        <View key={`r-${ri}`} style={styles.calRow}>
+          {row.map((cell, ci) => {
+            if (!cell) {
+              return <View key={`c-${ri}-${ci}`} style={styles.calCellEmpty} />;
+            }
+            const d = parseFecha(cell.iso);
+            const isPast = d ? d < hoy : false;
+            const isToday = d ? toISODate(d) === toISODate(hoy) : false;
+            const inRange =
+              d && desdeD && hastaD && d >= desdeD && d <= hastaD;
+            const isStart = cell.iso === desde;
+            const isEnd = cell.iso === hasta;
+            const isEdge = isStart || isEnd;
+            return (
+              <TouchableOpacity
+                key={`c-${ri}-${ci}`}
+                style={[
+                  styles.calCell,
+                  inRange && !isEdge && styles.calCellRange,
+                  isEdge && styles.calCellEdge,
+                ]}
+                onPress={() => onSelect(cell.iso)}
+                disabled={isPast}
+                activeOpacity={0.7}
+                testID={`cal-day-${cell.iso}`}
+              >
+                <Text
+                  style={[
+                    styles.calCellText,
+                    isPast && styles.calCellPast,
+                    isToday && !isEdge && styles.calCellToday,
+                    isEdge && styles.calCellEdgeText,
+                  ]}
+                >
+                  {cell.day}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      ))}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: COLORS.background },
   header: {
@@ -223,32 +363,87 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   back: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 40, height: 40, borderRadius: 20,
     backgroundColor: COLORS.surface,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: 'center', alignItems: 'center',
   },
   headerIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 40, height: 40, borderRadius: 20,
     backgroundColor: COLORS.primaryLight,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: 'center', alignItems: 'center',
   },
   title: { fontSize: 20, fontWeight: '800', color: COLORS.text },
   subtitle: { fontSize: 12, color: COLORS.textSecondary, marginTop: 2 },
   scroll: { padding: 16, paddingBottom: 40 },
-  card: {
+  rangeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  rangeBox: {
+    flex: 1,
+    backgroundColor: COLORS.surface,
+    borderRadius: 14,
+    padding: 12,
+  },
+  rangeLbl: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    fontWeight: '700',
+  },
+  rangeVal: { fontSize: 13, color: COLORS.text, fontWeight: '700', marginTop: 4 },
+  rangeArrow: { paddingHorizontal: 2 },
+  calCard: {
     backgroundColor: COLORS.surface,
     borderRadius: 16,
-    padding: 16,
-    gap: 14,
+    padding: 12,
   },
-  field: { gap: 6 },
-  fieldLabel: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  calHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  calNavBtn: {
+    width: 36, height: 36, borderRadius: 10,
+    backgroundColor: COLORS.surfaceAlt,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  calTitle: { fontSize: 15, fontWeight: '800', color: COLORS.text },
+  weekRow: {
+    flexDirection: 'row',
+    marginBottom: 4,
+  },
+  weekLbl: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.textMuted,
+    textTransform: 'uppercase',
+  },
+  calRow: { flexDirection: 'row' },
+  calCell: {
+    flex: 1,
+    aspectRatio: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    margin: 1,
+    borderRadius: 10,
+  },
+  calCellEmpty: { flex: 1, aspectRatio: 1, margin: 1 },
+  calCellRange: { backgroundColor: COLORS.primaryLight },
+  calCellEdge: { backgroundColor: COLORS.primary },
+  calCellText: { fontSize: 14, color: COLORS.text, fontWeight: '600' },
+  calCellPast: { color: COLORS.textMuted, fontWeight: '400' },
+  calCellToday: { color: COLORS.primary, fontWeight: '800' },
+  calCellEdgeText: { color: '#FFFFFF', fontWeight: '800' },
+  helpRow: { paddingHorizontal: 4, paddingTop: 8 },
+  helpText: { fontSize: 12, color: COLORS.textSecondary },
+  field: { gap: 6, marginTop: 12 },
   fieldLabelText: {
     fontSize: 12,
     fontWeight: '700',
@@ -257,7 +452,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   input: {
-    backgroundColor: COLORS.surfaceAlt,
+    backgroundColor: COLORS.surface,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: COLORS.border,
@@ -267,7 +462,6 @@ const styles = StyleSheet.create({
     color: COLORS.text,
   },
   textArea: { minHeight: 80, textAlignVertical: 'top' },
-  helper: { fontSize: 12, color: COLORS.textMuted, marginTop: 2 },
   summary: {
     backgroundColor: COLORS.surface,
     borderRadius: 16,

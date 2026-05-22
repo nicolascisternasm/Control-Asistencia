@@ -4,7 +4,7 @@
 
 import createContextHook from '@nkzw/create-context-hook';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Trabajador } from '@/types';
 import { repo } from '@/services/repository';
 import { cleanRut, validateRut } from '@/utils/rut';
@@ -35,6 +35,15 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const [trabajador, setTrabajador] = useState<Trabajador | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
+  // Mantiene la id del trabajador actual en un ref para que los callbacks
+  // (refreshTrabajador / updateProfile / changePassword) puedan tener
+  // identidad estable y no disparen loops infinitos cuando se usan en
+  // useEffect deps.
+  const trabajadorRef = useRef<Trabajador | null>(null);
+  useEffect(() => {
+    trabajadorRef.current = trabajador;
+  }, [trabajador]);
 
   useEffect(() => {
     (async () => {
@@ -102,14 +111,12 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   }, []);
 
   const refreshTrabajador = useCallback(async (): Promise<Trabajador | null> => {
-    if (!trabajador) return null;
-    const currentId = trabajador.id;
+    const current = trabajadorRef.current;
+    if (!current) return null;
+    const currentId = current.id;
     try {
       const fresh = await repo.getTrabajadorById(currentId);
       if (fresh) {
-        // Solo actualizamos si todavía hay una sesión activa con el mismo id;
-        // si el usuario cerró sesión mientras el refresh estaba en vuelo, no
-        // revivimos el estado.
         setTrabajador((prev) => (prev && prev.id === currentId ? fresh : prev));
         return fresh;
       }
@@ -117,12 +124,13 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       console.log('[auth] refresh error', e);
     }
     return null;
-  }, [trabajador]);
+  }, []);
 
   const updateProfile = useCallback(
     async (patch: Partial<Trabajador>): Promise<void> => {
-      if (!trabajador) throw new Error('No hay sesión activa');
-      const currentId = trabajador.id;
+      const current = trabajadorRef.current;
+      if (!current) throw new Error('No hay sesión activa');
+      const currentId = current.id;
       await repo.updateTrabajador(currentId, patch);
       const fresh = await repo.getTrabajadorById(currentId);
       setTrabajador((prev) => {
@@ -130,20 +138,16 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         return fresh ?? { ...prev, ...patch };
       });
     },
-    [trabajador],
+    [],
   );
 
-  const changePassword = useCallback(
-    async (newPassword: string): Promise<boolean> => {
-      if (!trabajador) throw new Error('No hay sesión activa');
-      const ok = await repo.resetPasswordRemote(trabajador.rut, newPassword);
-      if (!ok) {
-        // Fallback local si Supabase no está disponible
-        await repo.setPassword(trabajador.rut, newPassword);
-      }
-      return ok;
+  const solicitarResetPassword = useCallback(
+    async (comentario?: string): Promise<boolean> => {
+      const current = trabajadorRef.current;
+      if (!current) throw new Error('No hay sesión activa');
+      return await repo.solicitarResetPassword(current, comentario ?? '');
     },
-    [trabajador],
+    [],
   );
 
   return {
@@ -158,6 +162,6 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     logout,
     refreshTrabajador,
     updateProfile,
-    changePassword,
+    solicitarResetPassword,
   };
 });
