@@ -119,9 +119,14 @@ const USUARIOS_TABLE = 'trabajadores';
 /**
  * Tabla espejo (gestionada por el ERP) que guarda la contraseña del trabajador.
  * Comparte el mismo `id` que la tabla `trabajadores`, por lo que el vínculo
- * entre ambas se hace por id. Columnas relevantes: id, password_hash, password.
+ * entre ambas se hace por id. Columnas relevantes: id, rut, password_hash, password.
+ *
+ * Esta es también la tabla que se usa para el LOGIN: buscamos al usuario por
+ * RUT directamente acá, y si la fila no tiene los datos completos del
+ * trabajador hacemos un join por id contra `trabajadores`.
  */
 const PASSWORDS_TABLE = 'usuarios';
+const LOGIN_TABLE = 'usuarios';
 
 /** Divide "Camila Almonte Soto" -> { nombres: 'Camila', apellidos: 'Almonte Soto' }. */
 function splitNombreCompleto(full: string): { nombres: string; apellidos: string } {
@@ -291,52 +296,78 @@ function rutVariants(rut: string): string[] {
 
 async function fetchTrabajadorFromSupabaseByRut(rut: string): Promise<Trabajador | null> {
   if (!SUPABASE_ENABLED || !supabase) {
-    console.log('[repo] supabase deshabilitado, no se puede consultar usuarios');
+    console.log('[repo] supabase deshabilitado, no se puede consultar login');
     return null;
   }
   const target = cleanRut(rut);
   const variants = rutVariants(rut);
-  console.log('[repo] consultando usuarios en supabase', { rutInput: rut, target, variants });
-  try {
-    // 1) Intento directo con `in` sobre las variantes más comunes
+  console.log('[repo] consultando login en supabase', { table: LOGIN_TABLE, rutInput: rut, target, variants });
+
+  /** Encuentra la fila del login en la tabla `usuarios` por RUT. */
+  async function findLoginRow(): Promise<Record<string, unknown> | null> {
+    if (!supabase) return null;
+    // 1) Intento directo por variantes de RUT
     const { data, error } = await supabase
-      .from(USUARIOS_TABLE)
+      .from(LOGIN_TABLE)
       .select('*')
       .in('rut', variants)
       .limit(5);
     if (error) {
-      console.log('[repo] supabase usuarios .in error', error.message, error.details);
+      console.log('[repo] supabase login .in error', error.message, error.details);
     } else if (data && data.length > 0) {
-      console.log('[repo] usuario encontrado via .in', { count: data.length });
-      return mapSupabaseTrabajador(data[0] as Record<string, unknown>);
-    } else {
-      console.log('[repo] .in no devolvió filas, intentando barrido');
+      console.log('[repo] login encontrado via .in', { count: data.length });
+      return data[0] as Record<string, unknown>;
     }
-
-    // 2) Fallback: barrido y filtro normalizado en cliente (por si el RUT en BD tiene formato distinto)
+    // 2) Barrido y filtro normalizado en cliente
     const { data: all, error: err2 } = await supabase
-      .from(USUARIOS_TABLE)
+      .from(LOGIN_TABLE)
       .select('*')
-      .limit(1000);
+      .limit(2000);
     if (err2) {
-      console.log('[repo] supabase usuarios barrido error', err2.message, err2.details);
+      console.log('[repo] supabase login barrido error', err2.message, err2.details);
       return null;
     }
-    if (!all) {
-      console.log('[repo] supabase usuarios barrido sin data');
-      return null;
-    }
-    console.log('[repo] barrido usuarios filas=', all.length);
+    if (!all) return null;
+    console.log('[repo] barrido login filas=', all.length);
     const row = (all as Record<string, unknown>[]).find(
       (r) => cleanRut(String(r.rut ?? '')) === target,
     );
     if (!row) {
-      console.log('[repo] RUT no encontrado en barrido. Muestras:', (all as Record<string, unknown>[]).slice(0, 3).map((r) => r.rut));
+      console.log('[repo] RUT no encontrado. Muestras:', (all as Record<string, unknown>[]).slice(0, 3).map((r) => r.rut));
       return null;
     }
-    return mapSupabaseTrabajador(row);
+    return row;
+  }
+
+  try {
+    const loginRow = await findLoginRow();
+    if (!loginRow) return null;
+
+    // Si la fila de usuarios trae datos completos, la usamos directamente.
+    // Si no, intentamos enriquecerla con un join por id contra `trabajadores`.
+    const id = String(loginRow.id ?? '');
+    let mergedRow: Record<string, unknown> = loginRow;
+    if (id) {
+      try {
+        const { data: tRow, error: tErr } = await supabase
+          .from(USUARIOS_TABLE)
+          .select('*')
+          .eq('id', id)
+          .maybeSingle();
+        if (!tErr && tRow) {
+          // Los datos de `trabajadores` mandan (nombre/empresa/permisos);
+          // mantenemos el `id` y el `rut` de la fila de login.
+          mergedRow = { ...(tRow as Record<string, unknown>), id, rut: loginRow.rut ?? (tRow as Record<string, unknown>).rut };
+        } else if (tErr) {
+          console.log('[repo] join trabajadores error', tErr.message);
+        }
+      } catch (e) {
+        console.log('[repo] join trabajadores exception', e);
+      }
+    }
+    return mapSupabaseTrabajador(mergedRow);
   } catch (e) {
-    console.log('[repo] supabase usuarios exception', e);
+    console.log('[repo] supabase login exception', e);
     return null;
   }
 }
