@@ -14,7 +14,7 @@
         "buildType": "apk"
       },
       "env": {
-        "GRADLE_OPTS": "-Xmx8g -XX:MaxMetaspaceSize=512m -XX:+HeapDumpOnOutOfMemoryError"
+        "GRADLE_OPTS": "-Xmx4g -XX:MaxMetaspaceSize=512m"
       }
     },
     "production": {
