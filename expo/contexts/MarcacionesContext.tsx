@@ -6,6 +6,23 @@ import createContextHook from '@nkzw/create-context-hook';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Platform } from 'react-native';
 import * as Location from 'expo-location';
+import * as ExpoCrypto from 'expo-crypto';
+
+function newUuid(): string {
+  try {
+    const v = ExpoCrypto.randomUUID?.();
+    if (typeof v === 'string' && v.length === 36) return v;
+  } catch {}
+  const hex = '0123456789abcdef';
+  const b = new Array(36);
+  for (let i = 0; i < 36; i++) {
+    if (i === 8 || i === 13 || i === 18 || i === 23) b[i] = '-';
+    else if (i === 14) b[i] = '4';
+    else if (i === 19) b[i] = hex[(Math.random() * 4) | 0 | 8];
+    else b[i] = hex[(Math.random() * 16) | 0];
+  }
+  return b.join('');
+}
 import {
   EstadoValidacion,
   Marcacion,
@@ -166,7 +183,7 @@ export const [MarcacionesProvider, useMarcaciones] = createContextHook(() => {
       const hoy = new Date().toISOString().slice(0, 10);
       try {
         const nueva: SolicitudOmitirColacion = {
-          id: `oc-${Date.now()}`,
+          id: newUuid(),
           trabajador_id: trabajador.id,
           trabajador_nombre: `${trabajador.nombres} ${trabajador.apellidos}`,
           fecha: hoy,
@@ -254,7 +271,7 @@ export const [MarcacionesProvider, useMarcaciones] = createContextHook(() => {
       }
 
       const nueva: Marcacion = {
-        id: `m-${Date.now()}`,
+        id: newUuid(),
         trabajador_id: trabajador.id,
         tipo_marcacion: tipo,
         fecha_hora_servidor: ahora,
@@ -271,7 +288,14 @@ export const [MarcacionesProvider, useMarcaciones] = createContextHook(() => {
         origen: 'app',
       };
 
-      await repo.addMarcacion(nueva);
+      try {
+        await repo.addMarcacion(nueva);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'No se pudo guardar la marcación';
+        console.log('[marcaciones] save failed', msg);
+        await recargar();
+        return { ok: false, message: msg };
+      }
       await recargar();
 
       let message = 'Marcación registrada correctamente';

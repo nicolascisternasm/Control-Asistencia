@@ -42,6 +42,7 @@ export const marcacionesService = {
   },
 
   async add(m: Marcacion): Promise<Marcacion> {
+    let remoteError: string | null = null;
     if (SUPABASE_ENABLED && supabase) {
       try {
         const { data, error } = await supabase
@@ -50,7 +51,17 @@ export const marcacionesService = {
           .select()
           .single();
         if (error) {
-          console.log('[marcaciones] add error, fallback local', error.message);
+          console.log(
+            '[marcaciones] add error',
+            error.message,
+            error.details,
+            error.hint,
+            error.code,
+          );
+          remoteError =
+            error.message +
+            (error.details ? ` (${error.details})` : '') +
+            (error.hint ? ` [${error.hint}]` : '');
         } else if (data) {
           const all = await readLocal();
           all.unshift(data as Marcacion);
@@ -59,11 +70,17 @@ export const marcacionesService = {
         }
       } catch (e) {
         console.log('[marcaciones] add exception', e);
+        remoteError =
+          e instanceof Error ? e.message : 'Error desconocido al guardar en Supabase';
       }
+    } else {
+      remoteError = 'Supabase no configurado';
     }
+    // Guardamos copia local pero propagamos el error para que el trabajador
+    // sepa que la marcación NO llegó al servidor.
     const all = await readLocal();
     all.unshift(m);
     await writeLocal(all);
-    return m;
+    throw new Error(`No se pudo guardar marcación en el servidor: ${remoteError ?? 'desconocido'}`);
   },
 };
