@@ -26,9 +26,9 @@ import {
   Shield,
   ChevronRight,
   Plane,
-  Pencil,
   Calendar,
   KeyRound,
+  Lock,
   X,
   Check,
   RefreshCw,
@@ -37,19 +37,18 @@ import { useRouter } from 'expo-router';
 import { useVacaciones } from '@/contexts/VacacionesContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useMarcaciones } from '@/contexts/MarcacionesContext';
-import { COLORS, Trabajador } from '@/types';
+import { COLORS } from '@/types';
 import { formatRut } from '@/utils/rut';
 
 export default function ProfileScreen(): React.ReactElement {
   const router = useRouter();
-  const { trabajador, logout, isAdmin, refreshTrabajador, updateProfile, changePassword } = useAuth();
+  const { trabajador, logout, isAdmin, refreshTrabajador, changePassword } = useAuth();
   const { puntoAsignado, marcaciones } = useMarcaciones();
   const { solicitudes: vacSolicitudes } = useVacaciones();
   const vacPendientes = vacSolicitudes.filter((s) => s.estado === 'pendiente').length;
   const [notifs, setNotifs] = useState<boolean>(true);
   const [recordatorio, setRecordatorio] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
-  const [editVisible, setEditVisible] = useState<boolean>(false);
   const [pwdVisible, setPwdVisible] = useState<boolean>(false);
 
   useEffect(() => {
@@ -125,15 +124,12 @@ export default function ProfileScreen(): React.ReactElement {
             </Text>
           </View>
 
-          <TouchableOpacity
-            style={styles.editBtn}
-            onPress={() => setEditVisible(true)}
-            activeOpacity={0.85}
-            testID="btn-editar-perfil"
-          >
-            <Pencil size={15} color={COLORS.primary} />
-            <Text style={styles.editBtnText}>Editar perfil</Text>
-          </TouchableOpacity>
+          <View style={styles.readonlyBadge}>
+            <Lock size={12} color={COLORS.textSecondary} />
+            <Text style={styles.readonlyBadgeText}>
+              Datos gestionados por tu administrador
+            </Text>
+          </View>
 
           <View style={styles.divider} />
 
@@ -251,17 +247,6 @@ export default function ProfileScreen(): React.ReactElement {
         <Text style={styles.version}>ControlAsistencia v1.0</Text>
       </ScrollView>
 
-      {trabajador && (
-        <EditProfileModal
-          visible={editVisible}
-          onClose={() => setEditVisible(false)}
-          trabajador={trabajador}
-          onSave={async (patch) => {
-            await updateProfile(patch);
-          }}
-        />
-      )}
-
       <ChangePasswordModal
         visible={pwdVisible}
         onClose={() => setPwdVisible(false)}
@@ -318,130 +303,6 @@ function PrefRow({
         thumbColor="#FFFFFF"
       />
     </View>
-  );
-}
-
-function EditProfileModal({
-  visible,
-  onClose,
-  trabajador,
-  onSave,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  trabajador: Trabajador;
-  onSave: (patch: Partial<Trabajador>) => Promise<void>;
-}): React.ReactElement {
-  const [nombres, setNombres] = useState<string>(trabajador.nombres ?? '');
-  const [apellidos, setApellidos] = useState<string>(trabajador.apellidos ?? '');
-  const [email, setEmail] = useState<string>(trabajador.email ?? '');
-  const [telefono, setTelefono] = useState<string>(trabajador.telefono ?? '');
-  const [cargo, setCargo] = useState<string>(trabajador.cargo ?? '');
-  const [fechaIngreso, setFechaIngreso] = useState<string>(trabajador.fecha_ingreso ?? '');
-  const [saving, setSaving] = useState<boolean>(false);
-
-  useEffect(() => {
-    if (visible) {
-      setNombres(trabajador.nombres ?? '');
-      setApellidos(trabajador.apellidos ?? '');
-      setEmail(trabajador.email ?? '');
-      setTelefono(trabajador.telefono ?? '');
-      setCargo(trabajador.cargo ?? '');
-      setFechaIngreso(trabajador.fecha_ingreso ?? '');
-    }
-  }, [visible, trabajador]);
-
-  const handleSave = async () => {
-    if (!nombres.trim() || !apellidos.trim()) {
-      Alert.alert('Datos incompletos', 'Nombres y apellidos son obligatorios.');
-      return;
-    }
-    if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-      Alert.alert('Email inválido', 'Ingresa un correo válido.');
-      return;
-    }
-    setSaving(true);
-    try {
-      await onSave({
-        nombres: nombres.trim(),
-        apellidos: apellidos.trim(),
-        email: email.trim() || undefined,
-        telefono: telefono.trim(),
-        cargo: cargo.trim(),
-        fecha_ingreso: fechaIngreso.trim() || null,
-      });
-      Alert.alert('Perfil actualizado', 'Tus cambios se guardaron correctamente.');
-      onClose();
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Error desconocido';
-      Alert.alert('No se pudo guardar', msg);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      <SafeAreaView style={styles.screen} edges={['top']}>
-        <View style={styles.modalHeader}>
-          <TouchableOpacity onPress={onClose} style={styles.modalIconBtn} testID="btn-cerrar-editar">
-            <X size={22} color={COLORS.text} />
-          </TouchableOpacity>
-          <Text style={styles.modalTitle}>Editar perfil</Text>
-          <TouchableOpacity
-            onPress={handleSave}
-            style={[styles.modalSaveBtn, saving && { opacity: 0.5 }]}
-            disabled={saving}
-            testID="btn-guardar-perfil"
-          >
-            {saving ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <>
-                <Check size={16} color="#FFFFFF" />
-                <Text style={styles.modalSaveTxt}>Guardar</Text>
-              </>
-            )}
-          </TouchableOpacity>
-        </View>
-
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={{ flex: 1 }}
-        >
-          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
-            <Field label="Nombres" value={nombres} onChangeText={setNombres} placeholder="Tus nombres" />
-            <Field label="Apellidos" value={apellidos} onChangeText={setApellidos} placeholder="Tus apellidos" />
-            <Field
-              label="Email"
-              value={email}
-              onChangeText={setEmail}
-              placeholder="correo@empresa.cl"
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
-            <Field
-              label="Teléfono"
-              value={telefono}
-              onChangeText={setTelefono}
-              placeholder="+56 9 1234 5678"
-              keyboardType="phone-pad"
-            />
-            <Field label="Cargo" value={cargo} onChangeText={setCargo} placeholder="Cargo o puesto" />
-            <Field
-              label="Fecha de ingreso"
-              value={fechaIngreso}
-              onChangeText={setFechaIngreso}
-              placeholder="YYYY-MM-DD"
-              autoCapitalize="none"
-            />
-            <Text style={styles.helpText}>
-              El RUT y la empresa no se pueden modificar desde aquí. Si necesitas cambiarlos, contacta a un administrador.
-            </Text>
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </SafeAreaView>
-    </Modal>
   );
 }
 
@@ -632,7 +493,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   roleText: { color: COLORS.primary, fontSize: 12, fontWeight: '700' },
-  editBtn: {
+  readonlyBadge: {
     alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
@@ -640,12 +501,12 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.surfaceAlt,
     borderWidth: 1,
     borderColor: COLORS.border,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderRadius: 10,
     marginTop: 12,
   },
-  editBtnText: { color: COLORS.primary, fontSize: 13, fontWeight: '700' },
+  readonlyBadgeText: { color: COLORS.textSecondary, fontSize: 11, fontWeight: '600' },
   divider: { height: 1, backgroundColor: COLORS.border, marginVertical: 14 },
   infoRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 6 },
   infoIcon: {
