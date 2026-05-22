@@ -34,7 +34,9 @@ async function writePending(list: SolicitudOmitirColacion[]): Promise<void> {
 
 function dedupeById(list: SolicitudOmitirColacion[]): SolicitudOmitirColacion[] {
   const map = new Map<string, SolicitudOmitirColacion>();
-  for (const item of list) map.set(item.id, item);
+  for (const item of list) {
+    if (!map.has(item.id)) map.set(item.id, item);
+  }
   return Array.from(map.values());
 }
 
@@ -89,7 +91,16 @@ export const omitirColacionService = {
       : pending;
 
     if (remote) {
-      const merged = dedupeById([...remote, ...pendingFiltered]);
+      const remoteIds = new Set(remote.map((r) => r.id));
+      // Limpia de la cola pendiente lo que ya quedó en Supabase
+      const allPending = await readPending();
+      const cleanedPending = allPending.filter((p) => !remoteIds.has(p.id));
+      if (cleanedPending.length !== allPending.length) {
+        await writePending(cleanedPending);
+      }
+      const stillPending = pendingFiltered.filter((p) => !remoteIds.has(p.id));
+      // remote primero => gana sobre cualquier copia local stale con mismo id
+      const merged = dedupeById([...remote, ...stillPending]);
       await writeLocal(merged);
       return merged.sort((a, b) => b.creado_en.localeCompare(a.creado_en));
     }
@@ -116,7 +127,20 @@ export const omitirColacionService = {
           .order('creado_en', { ascending: false })
           .limit(1);
         if (!error && data && data.length > 0) {
-          return data[0] as SolicitudOmitirColacion;
+          const fresh = data[0] as SolicitudOmitirColacion;
+          // Sincroniza el cache local con el estado autoritativo del servidor
+          const all = await readLocal();
+          const idx = all.findIndex((x) => x.id === fresh.id);
+          if (idx >= 0) all[idx] = fresh; else all.unshift(fresh);
+          await writeLocal(all);
+          const pending = await readPending();
+          const nextPending = pending.filter((x) => x.id !== fresh.id);
+          if (nextPending.length !== pending.length) await writePending(nextPending);
+          return fresh;
+        }
+        if (!error && data && data.length === 0) {
+          // El servidor confirmó que no hay solicitud hoy; no devolver copia local stale
+          return null;
         }
         if (error) {
           console.log('[omitir-colacion] findHoy error, fallback local', error.message);
