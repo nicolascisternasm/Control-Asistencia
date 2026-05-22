@@ -274,7 +274,7 @@ export default function DashboardScreen(): React.ReactElement {
             const esSiguiente = siguiente === tipo;
             const esColacion = tipo === 'salida_colacion' || tipo === 'regreso_colacion';
             const bloqueadoPorOmitir = colacionAprobadaOmitir && esColacion;
-            const disabled = !esSiguiente || procesando || bloqueadoPorOmitir;
+            const disabled = !esSiguiente || procesando || bloqueadoPorOmitir || !!hecha;
             return (
               <TouchableOpacity
                 key={tipo}
@@ -283,6 +283,7 @@ export default function DashboardScreen(): React.ReactElement {
                   styles.cell,
                   hecha && styles.cellDone,
                   esSiguiente && { borderColor: COLORES_TIPO[tipo], borderWidth: 2 },
+                  !esSiguiente && !hecha && { opacity: 0.55 },
                 ]}
                 onPress={() => onMarcar(tipo)}
                 disabled={disabled}

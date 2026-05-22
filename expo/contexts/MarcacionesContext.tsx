@@ -222,6 +222,21 @@ export const [MarcacionesProvider, useMarcaciones] = createContextHook(() => {
           message: 'Colación omitida aprobada: no debes marcar colación hoy',
         };
       }
+
+      // Guard duro: si ya existe una marcación de este tipo hoy, no permitir otra.
+      const hoyStr = new Date().toISOString().slice(0, 10);
+      const yaExiste = marcaciones.some(
+        (m) =>
+          m.tipo_marcacion === tipo &&
+          m.fecha_hora_servidor.slice(0, 10) === hoyStr,
+      );
+      if (yaExiste) {
+        return {
+          ok: false,
+          message: 'Ya marcaste esta acción hoy',
+        };
+      }
+
       const esperado = siguiente;
       if (esperado !== tipo) {
         if (esperado === null) {
