@@ -59,7 +59,11 @@ export default function LoginScreen(): React.ReactElement {
     }
     const res = await login(rut, password);
     if (!res.ok && res.error) {
-      setError(errorLabel[res.error]);
+      let msg = errorLabel[res.error];
+      if (res.error === 'password_incorrecta' && res.hashPreview) {
+        msg += `\n\nDiagnóstico — hash generado: ${res.hashPreview}…\nCompará con el password_hash en Supabase (primeros 16 chars).`;
+      }
+      setError(msg);
     }
   }, [rut, password, login]);
 

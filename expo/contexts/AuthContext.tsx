@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Trabajador } from '@/types';
 import { repo } from '@/services/repository';
 import { cleanRut, validateRut } from '@/utils/rut';
+import { hashPassword } from '@/utils/crypto';
 
 const SESSION_KEY = 'ca.session.v1';
 const SESSION_TTL_DAYS = 30;
@@ -29,6 +30,8 @@ export type LoginError =
 export interface LoginResult {
   ok: boolean;
   error?: LoginError;
+  /** Primeros 16 chars del SHA-256(password) — diagnóstico cuando falla por contraseña. */
+  hashPreview?: string;
 }
 
 export const [AuthProvider, useAuth] = createContextHook(() => {
@@ -82,9 +85,17 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         if (!t) return { ok: false, error: 'no_encontrado' };
         if (!t.activo) return { ok: false, error: 'bloqueado' };
         if (t.app_activa === false) return { ok: false, error: 'app_desactivada' };
-        const passwordOk = await repo.verifyPassword(rut, password);
+        const cleanPassword = password.trim();
+        const passwordOk = await repo.verifyPassword(rut, cleanPassword);
         if (!passwordOk) {
-          return { ok: false, error: 'password_incorrecta' };
+          let hashPreview: string | undefined;
+          try {
+            const h = await hashPassword(cleanPassword);
+            hashPreview = h.slice(0, 16);
+          } catch (e) {
+            console.log('[auth] hash preview error', e);
+          }
+          return { ok: false, error: 'password_incorrecta', hashPreview };
         }
         const now = new Date();
         const expiresAt = new Date(now);
