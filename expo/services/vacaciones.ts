@@ -107,6 +107,7 @@ export const vacacionesService = {
   async add(s: SolicitudVacaciones): Promise<SolicitudVacaciones> {
     let saved: SolicitudVacaciones = s;
     let syncedToRemote = false;
+    let remoteError: string | null = null;
     if (SUPABASE_ENABLED && supabase) {
       try {
         const { data, error } = await supabase
@@ -115,26 +116,35 @@ export const vacacionesService = {
           .select()
           .single();
         if (error) {
-          console.log('[vacaciones] add error, fallback local', error.message);
+          console.log('[vacaciones] add error', error.message, error.details, error.hint, error.code);
+          remoteError = error.message + (error.details ? ` (${error.details})` : '') + (error.hint ? ` [${error.hint}]` : '');
         } else if (data) {
           saved = data as SolicitudVacaciones;
           syncedToRemote = true;
         }
       } catch (e) {
         console.log('[vacaciones] add exception', e);
+        remoteError = e instanceof Error ? e.message : 'Error desconocido al guardar en Supabase';
       }
+    } else {
+      remoteError = 'Supabase no configurado';
+    }
+
+    if (!syncedToRemote) {
+      // Guardamos en cola local para reintentar luego, pero propagamos el error
+      // para que el trabajador sepa que la solicitud NO llegó al servidor.
+      const pending = await readPending();
+      const nextPending = dedupeById([saved, ...pending]);
+      await writePending(nextPending);
+      const all = await readLocal();
+      await writeLocal(dedupeById([saved, ...all]));
+      console.log('[vacaciones] queued pending', saved.id);
+      throw new Error(`No se pudo guardar en el servidor: ${remoteError ?? 'desconocido'}`);
     }
 
     const all = await readLocal();
     const next = dedupeById([saved, ...all]);
     await writeLocal(next);
-
-    if (!syncedToRemote) {
-      const pending = await readPending();
-      const nextPending = dedupeById([saved, ...pending]);
-      await writePending(nextPending);
-      console.log('[vacaciones] queued pending', saved.id);
-    }
     return saved;
   },
 
