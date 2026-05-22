@@ -1,5 +1,6 @@
 import createContextHook from '@nkzw/create-context-hook';
 import { useCallback, useEffect, useState } from 'react';
+import * as ExpoCrypto from 'expo-crypto';
 import { SolicitudVacaciones } from '@/types';
 import { repo } from '@/services/repository';
 import { useAuth } from '@/contexts/AuthContext';
@@ -8,6 +9,23 @@ import {
   diasHabilesDeAnticipacion,
   parseFecha,
 } from '@/utils/fecha';
+
+function newUuid(): string {
+  try {
+    const v = ExpoCrypto.randomUUID?.();
+    if (typeof v === 'string' && v.length === 36) return v;
+  } catch {}
+  // RFC4122 v4 fallback
+  const hex = '0123456789abcdef';
+  const b = new Array(36);
+  for (let i = 0; i < 36; i++) {
+    if (i === 8 || i === 13 || i === 18 || i === 23) b[i] = '-';
+    else if (i === 14) b[i] = '4';
+    else if (i === 19) b[i] = hex[(Math.random() * 4) | 0 | 8];
+    else b[i] = hex[(Math.random() * 16) | 0];
+  }
+  return b.join('');
+}
 
 export const MIN_DIAS_ANTICIPACION = 5;
 
@@ -97,7 +115,7 @@ export const [VacacionesProvider, useVacaciones] = createContextHook(() => {
       const val = validarSolicitudVacaciones(fechaDesde, fechaHasta);
       if (!val.ok) return { ok: false, message: val.message };
       const nueva: SolicitudVacaciones = {
-        id: `vac-${Date.now()}`,
+        id: newUuid(),
         trabajador_id: trabajador.id,
         trabajador_nombre: `${trabajador.nombres} ${trabajador.apellidos}`,
         fecha_desde: fechaDesde,
