@@ -541,14 +541,34 @@ export const repo = {
         if (row) {
           const remoteHash = (row.password_hash as string | null) ?? null;
           const remotePlain = (row.password as string | null) ?? null;
+          const inputHash = await hashPassword(inputPassword);
+          console.log('[repo] verify supabase', {
+            rut: key,
+            hasHash: !!remoteHash,
+            hasPlain: !!remotePlain,
+            hashLen: remoteHash ? String(remoteHash).length : 0,
+          });
+          // Aceptamos múltiples formatos porque el ERP a veces guarda solo
+          // `password` (texto plano) y otras veces actualiza `password_hash`.
+          // Si cualquiera de los dos calza con lo ingresado, login OK.
           if (remoteHash) {
-            const inputHash = await hashPassword(inputPassword);
-            return inputHash === remoteHash;
+            // a) password_hash es SHA-256 hex del input
+            if (inputHash === String(remoteHash).toLowerCase()) return true;
+            // b) password_hash guardado en texto plano (algunos ERPs lo hacen)
+            if (inputPassword === remoteHash) return true;
           }
           if (remotePlain) {
-            return inputPassword === remotePlain;
+            // c) password en texto plano
+            if (inputPassword === remotePlain) return true;
+            // d) password contiene el hash SHA-256
+            if (inputHash === String(remotePlain).toLowerCase()) return true;
           }
-          console.log('[repo] usuarios row sin password para rut', key);
+          if (!remoteHash && !remotePlain) {
+            console.log('[repo] usuarios row sin password para rut', key);
+          } else {
+            console.log('[repo] password no coincide para rut', key);
+            return false;
+          }
         } else {
           console.log('[repo] usuarios sin fila para rut', key);
         }
