@@ -343,27 +343,50 @@ async function fetchTrabajadorFromSupabaseByRut(rut: string): Promise<Trabajador
     const loginRow = await findLoginRow();
     if (!loginRow) return null;
 
-    // Si la fila de usuarios trae datos completos, la usamos directamente.
-    // Si no, intentamos enriquecerla con un join por id contra `trabajadores`.
-    const id = String(loginRow.id ?? '');
+    // El `id` de la tabla `usuarios` puede NO ser un UUID (en esta BD viene
+    // como `usr-<timestamp>`), pero `solicitudes_vacaciones.trabajador_id`
+    // es UUID y apunta a `trabajadores.id`. Por eso buscamos la fila en
+    // `trabajadores` por RUT y usamos SU id (UUID) como id del trabajador.
     let mergedRow: Record<string, unknown> = loginRow;
-    if (id) {
-      try {
-        const { data: tRow, error: tErr } = await supabase
+    let trabajadorUuid: string | null = null;
+    try {
+      const { data: tRows, error: tErr } = await supabase
+        .from(USUARIOS_TABLE)
+        .select('*')
+        .in('rut', variants)
+        .limit(5);
+      let tRow: Record<string, unknown> | null = null;
+      if (!tErr && tRows && tRows.length > 0) {
+        tRow = tRows[0] as Record<string, unknown>;
+      } else {
+        // Barrido tolerante por si el RUT está con otro formato en `trabajadores`
+        const { data: all } = await supabase
           .from(USUARIOS_TABLE)
           .select('*')
-          .eq('id', id)
-          .maybeSingle();
-        if (!tErr && tRow) {
-          // Los datos de `trabajadores` mandan (nombre/empresa/permisos);
-          // mantenemos el `id` y el `rut` de la fila de login.
-          mergedRow = { ...(tRow as Record<string, unknown>), id, rut: loginRow.rut ?? (tRow as Record<string, unknown>).rut };
-        } else if (tErr) {
-          console.log('[repo] join trabajadores error', tErr.message);
+          .limit(2000);
+        if (all) {
+          tRow =
+            (all as Record<string, unknown>[]).find(
+              (r) => cleanRut(String(r.rut ?? '')) === target,
+            ) ?? null;
         }
-      } catch (e) {
-        console.log('[repo] join trabajadores exception', e);
       }
+      if (tRow) {
+        trabajadorUuid = String(tRow.id ?? '');
+        // Los datos de `trabajadores` mandan (nombre/empresa/permisos);
+        // el id queda como el UUID de `trabajadores`, no el de `usuarios`.
+        mergedRow = {
+          ...tRow,
+          id: trabajadorUuid,
+          rut: tRow.rut ?? loginRow.rut,
+        };
+      } else if (tErr) {
+        console.log('[repo] lookup trabajadores by rut error', tErr.message);
+      } else {
+        console.log('[repo] sin fila en trabajadores para rut', target);
+      }
+    } catch (e) {
+      console.log('[repo] lookup trabajadores by rut exception', e);
     }
     return mapSupabaseTrabajador(mergedRow);
   } catch (e) {
@@ -488,31 +511,46 @@ export const repo = {
     //    (espejo gestionado por el ERP, vinculada a `trabajadores` por id).
     if (SUPABASE_ENABLED && supabase) {
       try {
-        // Primero buscamos al trabajador para obtener su id
-        const trabajador = await fetchTrabajadorFromSupabaseByRut(rut);
-        if (trabajador?.id) {
-          const { data, error } = await supabase
+        // El id de `usuarios` NO coincide con el UUID de `trabajadores` en
+        // esta BD, así que buscamos directamente por RUT (variantes).
+        const variants = rutVariants(rut);
+        let row: Record<string, unknown> | null = null;
+        const { data, error } = await supabase
+          .from(PASSWORDS_TABLE)
+          .select('id, rut, password_hash, password')
+          .in('rut', variants)
+          .limit(5);
+        if (error) {
+          console.log('[repo] supabase password verify .in error', error.message);
+        } else if (data && data.length > 0) {
+          row = data[0] as Record<string, unknown>;
+        }
+        if (!row) {
+          // Barrido tolerante por formato de RUT
+          const { data: all } = await supabase
             .from(PASSWORDS_TABLE)
-            .select('id, password_hash, password')
-            .eq('id', trabajador.id)
-            .maybeSingle();
-          if (error) {
-            console.log('[repo] supabase password verify error', error.message);
-          } else if (data) {
-            const row = data as Record<string, unknown>;
-            const remoteHash = (row.password_hash as string | null) ?? null;
-            const remotePlain = (row.password as string | null) ?? null;
-            if (remoteHash) {
-              const inputHash = await hashPassword(inputPassword);
-              return inputHash === remoteHash;
-            }
-            if (remotePlain) {
-              return inputPassword === remotePlain;
-            }
-            console.log('[repo] usuarios row sin password para id', trabajador.id);
-          } else {
-            console.log('[repo] usuarios sin fila para id', trabajador.id);
+            .select('id, rut, password_hash, password')
+            .limit(2000);
+          if (all) {
+            row =
+              (all as Record<string, unknown>[]).find(
+                (r) => cleanRut(String(r.rut ?? '')) === key,
+              ) ?? null;
           }
+        }
+        if (row) {
+          const remoteHash = (row.password_hash as string | null) ?? null;
+          const remotePlain = (row.password as string | null) ?? null;
+          if (remoteHash) {
+            const inputHash = await hashPassword(inputPassword);
+            return inputHash === remoteHash;
+          }
+          if (remotePlain) {
+            return inputPassword === remotePlain;
+          }
+          console.log('[repo] usuarios row sin password para rut', key);
+        } else {
+          console.log('[repo] usuarios sin fila para rut', key);
         }
       } catch (e) {
         console.log('[repo] supabase password verify exception', e);
@@ -566,17 +604,13 @@ export const repo = {
     }
 
     try {
-      // Resolver el id del trabajador (la tabla `usuarios` se enlaza por id)
-      const trabajador = await fetchTrabajadorFromSupabaseByRut(rut);
-      if (!trabajador?.id) {
-        console.log('[repo] resetPasswordRemote: trabajador no encontrado', key);
-        return false;
-      }
-
+      // En esta BD el id de `usuarios` no coincide con el UUID de
+      // `trabajadores`, así que actualizamos por RUT (variantes).
+      const variants = rutVariants(rut);
       const { error: updErr, data: updData } = await supabase
         .from(PASSWORDS_TABLE)
         .update({ password_hash: hash })
-        .eq('id', trabajador.id)
+        .in('rut', variants)
         .select('id');
       if (updErr) {
         console.log('[repo] resetPasswordRemote update error', updErr.message);
