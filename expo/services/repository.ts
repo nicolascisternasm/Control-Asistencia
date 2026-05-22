@@ -21,6 +21,7 @@ import { cleanRut } from '@/utils/rut';
 import { hashPassword, isHash, generateRandomPassword } from '@/utils/crypto';
 import { marcacionesService } from '@/services/marcaciones';
 import { vacacionesService } from '@/services/vacaciones';
+import { omitirColacionService } from '@/services/omitir-colacion';
 import { supabase, SUPABASE_ENABLED } from '@/services/supabase';
 
 const KEYS = {
@@ -822,53 +823,35 @@ export const repo = {
     }
   },
 
-  async getSolicitudesOmitirColacion(): Promise<SolicitudOmitirColacion[]> {
-    return await readJson<SolicitudOmitirColacion[]>(KEYS.omitirColacion, []);
+  async getSolicitudesOmitirColacion(trabajadorId?: string): Promise<SolicitudOmitirColacion[]> {
+    return await omitirColacionService.list(trabajadorId);
   },
 
   async getSolicitudOmitirColacionHoy(
     trabajadorId: string,
     fecha: string,
   ): Promise<SolicitudOmitirColacion | null> {
-    const all = await readJson<SolicitudOmitirColacion[]>(KEYS.omitirColacion, []);
-    return (
-      all.find(
-        (s) => s.trabajador_id === trabajadorId && s.fecha === fecha,
-      ) ?? null
-    );
+    return await omitirColacionService.findHoy(trabajadorId, fecha);
   },
 
   async addSolicitudOmitirColacion(s: SolicitudOmitirColacion): Promise<void> {
-    const all = await readJson<SolicitudOmitirColacion[]>(KEYS.omitirColacion, []);
-    const existe = all.find(
-      (x) => x.trabajador_id === s.trabajador_id && x.fecha === s.fecha,
-    );
-    if (existe) throw new Error('Ya existe una solicitud para hoy');
-    all.unshift(s);
-    await writeJson(KEYS.omitirColacion, all);
+    const existente = await omitirColacionService.findHoy(s.trabajador_id, s.fecha);
+    if (existente) throw new Error('Ya existe una solicitud para hoy');
+    await omitirColacionService.add(s);
   },
 
   async updateSolicitudOmitirColacion(
     id: string,
     patch: Partial<SolicitudOmitirColacion>,
   ): Promise<void> {
-    const all = await readJson<SolicitudOmitirColacion[]>(KEYS.omitirColacion, []);
-    const idx = all.findIndex((x) => x.id === id);
-    if (idx >= 0) {
-      all[idx] = { ...all[idx], ...patch };
-      await writeJson(KEYS.omitirColacion, all);
-    }
+    await omitirColacionService.update(id, patch);
   },
 
   async cancelSolicitudOmitirColacion(
     trabajadorId: string,
     fecha: string,
   ): Promise<void> {
-    const all = await readJson<SolicitudOmitirColacion[]>(KEYS.omitirColacion, []);
-    const next = all.filter(
-      (x) => !(x.trabajador_id === trabajadorId && x.fecha === fecha && x.estado === 'pendiente'),
-    );
-    await writeJson(KEYS.omitirColacion, next);
+    await omitirColacionService.cancel(trabajadorId, fecha);
   },
 
   async getSolicitudesVacaciones(trabajadorId?: string): Promise<SolicitudVacaciones[]> {
