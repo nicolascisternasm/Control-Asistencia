@@ -64,6 +64,7 @@ export interface Trabajador {
   activo: boolean;
   cargo: string;
   empresa: string;
+  empresa_id?: string | null;
   supervisor_id: string | null;
   ultimo_login: string | null;
   rol: 'trabajador' | 'supervisor' | 'admin';

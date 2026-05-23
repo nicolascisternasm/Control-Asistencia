@@ -129,6 +129,65 @@ const USUARIOS_TABLE = 'trabajadores';
 const PASSWORDS_TABLE = 'usuarios';
 const LOGIN_TABLE = 'usuarios';
 
+/** Tabla de empresas (id -> nombre). El ERP la mantiene. */
+const EMPRESAS_TABLE = 'empresas';
+
+/** Cache en memoria de id -> nombre de empresa. Se invalida al recargar la app. */
+let empresasCache: Map<string, string> | null = null;
+let empresasCacheAt: number = 0;
+const EMPRESAS_CACHE_TTL_MS = 5 * 60 * 1000;
+
+async function fetchEmpresasMap(force = false): Promise<Map<string, string>> {
+  const now = Date.now();
+  if (!force && empresasCache && now - empresasCacheAt < EMPRESAS_CACHE_TTL_MS) {
+    return empresasCache;
+  }
+  const map = new Map<string, string>();
+  if (!SUPABASE_ENABLED || !supabase) {
+    empresasCache = map;
+    empresasCacheAt = now;
+    return map;
+  }
+  try {
+    const { data, error } = await supabase
+      .from(EMPRESAS_TABLE)
+      .select('*')
+      .limit(2000);
+    if (error) {
+      console.log('[repo] fetchEmpresasMap error', error.message);
+    } else if (data) {
+      for (const row of data as Record<string, unknown>[]) {
+        const id = row.id == null ? '' : String(row.id);
+        if (!id) continue;
+        const name = pickString(row, [
+          'nombre',
+          'razon_social',
+          'nombre_fantasia',
+          'name',
+          'rut',
+        ]);
+        if (name) map.set(id, name);
+      }
+    }
+  } catch (e) {
+    console.log('[repo] fetchEmpresasMap exception', e);
+  }
+  empresasCache = map;
+  empresasCacheAt = now;
+  return map;
+}
+
+/** Resuelve `empresa` (nombre legible) usando el mapa id -> nombre. */
+function resolveEmpresa(t: Trabajador, empresasMap: Map<string, string>): Trabajador {
+  const rawId = (t.empresa_id ?? t.empresa ?? '').toString();
+  if (!rawId) return t;
+  const nombre = empresasMap.get(rawId);
+  if (nombre) {
+    return { ...t, empresa_id: rawId, empresa: nombre };
+  }
+  return { ...t, empresa_id: rawId };
+}
+
 /** Divide "Camila Almonte Soto" -> { nombres: 'Camila', apellidos: 'Almonte Soto' }. */
 function splitNombreCompleto(full: string): { nombres: string; apellidos: string } {
   const parts = (full ?? '').trim().split(/\s+/).filter(Boolean);
@@ -189,7 +248,8 @@ function mapSupabaseTrabajador(row: Record<string, unknown>): Trabajador {
     telefono: pickString(row, ['telefono', 'phone', 'celular']),
     activo,
     cargo: pickString(row, ['cargo', 'puesto', 'role_label']),
-    empresa: pickString(row, ['empresa_id', 'empresa', 'company']),
+    empresa: pickString(row, ['empresa', 'company', 'empresa_id']),
+    empresa_id: pickString(row, ['empresa_id', 'empresa', 'company']) || null,
     supervisor_id: (row.supervisor_id as string | null) ?? null,
     ultimo_login: (row.ultimo_login as string | null) ?? (row.last_login as string | null) ?? null,
     rol: 'trabajador',
@@ -233,7 +293,13 @@ function trabajadorToRow(t: Partial<Trabajador>): Record<string, unknown> {
   }
   if (t.telefono !== undefined) row.telefono = t.telefono;
   if (t.cargo !== undefined) row.cargo = t.cargo;
-  if (t.empresa !== undefined) row.empresa_id = t.empresa;
+  // `empresa_id` es la FK real a `empresas`; `empresa` es solo el nombre
+  // resuelto para mostrar en UI. Al guardar, priorizamos el id.
+  if (t.empresa_id !== undefined && t.empresa_id !== null) {
+    row.empresa_id = t.empresa_id;
+  } else if (t.empresa !== undefined) {
+    row.empresa_id = t.empresa;
+  }
   if (t.email !== undefined) row.email = t.email;
   if (t.fecha_ingreso !== undefined) row.fecha_ingreso = t.fecha_ingreso;
   if (t.estado !== undefined) row.estado = t.estado;
@@ -262,10 +328,18 @@ async function fetchAllTrabajadoresFromSupabase(empresa?: string): Promise<Traba
       console.log('[repo] supabase getAllTrabajadores error', error?.message);
       return null;
     }
-    const all = (data as Record<string, unknown>[]).map(mapSupabaseTrabajador);
+    const empresasMap = await fetchEmpresasMap();
+    const all = (data as Record<string, unknown>[])
+      .map(mapSupabaseTrabajador)
+      .map((t) => resolveEmpresa(t, empresasMap));
     if (!empresa || !empresa.trim()) return all;
     const target = normalizeEmpresa(empresa);
-    const filtered = all.filter((t) => normalizeEmpresa(t.empresa ?? '') === target);
+    const filtered = all.filter((t) => {
+      // Match por nombre (resuelto) o por id directo (por si el admin trae el id)
+      if (normalizeEmpresa(t.empresa ?? '') === target) return true;
+      if ((t.empresa_id ?? '').toString() === empresa) return true;
+      return false;
+    });
     console.log('[repo] trabajadores filtrados por empresa', { empresa, total: all.length, match: filtered.length });
     return filtered;
   } catch (e) {
@@ -389,7 +463,9 @@ async function fetchTrabajadorFromSupabaseByRut(rut: string): Promise<Trabajador
     } catch (e) {
       console.log('[repo] lookup trabajadores by rut exception', e);
     }
-    return mapSupabaseTrabajador(mergedRow);
+    const mapped = mapSupabaseTrabajador(mergedRow);
+    const empresasMap = await fetchEmpresasMap();
+    return resolveEmpresa(mapped, empresasMap);
   } catch (e) {
     console.log('[repo] supabase login exception', e);
     return null;
@@ -435,7 +511,9 @@ export const repo = {
           .eq('id', id)
           .maybeSingle();
         if (!error && data) {
-          return mapSupabaseTrabajador(data as Record<string, unknown>);
+          const mapped = mapSupabaseTrabajador(data as Record<string, unknown>);
+          const empresasMap = await fetchEmpresasMap();
+          return resolveEmpresa(mapped, empresasMap);
         }
       } catch (e) {
         console.log('[repo] getTrabajadorById supabase exception', e);
