@@ -35,7 +35,7 @@ const errorLabel: Record<LoginError, string> = {
   bloqueado:
     'Tu cuenta está inactiva. Solicita a tu administrador que la reactive.',
   app_desactivada:
-    'No tienes habilitado el acceso a la app. Contacta a tu administrador.',
+    'Tu acceso a la app está desactivado. Pídele a tu administrador que active tu acceso a la app para que puedas utilizarla.',
   usar_web:
     'Tu cuenta fue creada en el sistema web. Ingresa desde allí o usa “olvidé mi contraseña” en la web para recuperarla.',
 };
