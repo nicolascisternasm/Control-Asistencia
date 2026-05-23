@@ -592,6 +592,49 @@ export const repo = {
     await writeJson(KEYS.trabajadores, next);
   },
 
+  /**
+   * Devuelve el `hash_method` declarado en la fila de `usuarios` para ese RUT.
+   * Si no se encuentra o no hay supabase, devuelve 'sha256' (default seguro).
+   */
+  async getHashMethodByRut(rut: string): Promise<'sha256' | 'bcrypt'> {
+    if (!SUPABASE_ENABLED || !supabase) return 'sha256';
+    try {
+      const variants = rutVariants(rut);
+      const target = cleanRut(rut);
+      const { data, error } = await supabase
+        .from(LOGIN_TABLE)
+        .select('rut, hash_method, password_hash')
+        .in('rut', variants)
+        .limit(5);
+      let row: Record<string, unknown> | null = null;
+      if (!error && data && data.length > 0) {
+        row = data[0] as Record<string, unknown>;
+      } else {
+        const { data: all } = await supabase
+          .from(LOGIN_TABLE)
+          .select('rut, hash_method, password_hash')
+          .limit(2000);
+        if (all) {
+          row =
+            (all as Record<string, unknown>[]).find(
+              (r) => cleanRut(String(r.rut ?? '')) === target,
+            ) ?? null;
+        }
+      }
+      if (!row) return 'sha256';
+      const declared = String(row.hash_method ?? '').toLowerCase();
+      if (declared === 'bcrypt') return 'bcrypt';
+      if (declared === 'sha256') return 'sha256';
+      // Heurística: si no está declarado pero el hash empieza con $2 → bcrypt.
+      const ph = String(row.password_hash ?? '');
+      if (ph.startsWith('$2')) return 'bcrypt';
+      return 'sha256';
+    } catch (e) {
+      console.log('[repo] getHashMethodByRut exception', e);
+      return 'sha256';
+    }
+  },
+
   async verifyPassword(rut: string, inputPassword: string): Promise<boolean> {
     const key = cleanRut(rut);
 

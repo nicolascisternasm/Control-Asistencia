@@ -9,6 +9,11 @@ import { Trabajador } from '@/types';
 import { repo } from '@/services/repository';
 import { cleanRut, validateRut } from '@/utils/rut';
 import { hashPassword } from '@/utils/crypto';
+import {
+  registrarAdministrador,
+  RegistroAdminInput,
+  RegistroException,
+} from '@/services/usuarios';
 
 const SESSION_KEY = 'ca.session.v1';
 const SESSION_TTL_DAYS = 30;
@@ -25,13 +30,29 @@ export type LoginError =
   | 'no_encontrado'
   | 'password_incorrecta'
   | 'bloqueado'
-  | 'app_desactivada';
+  | 'app_desactivada'
+  | 'usar_web';
 
 export interface LoginResult {
   ok: boolean;
   error?: LoginError;
   /** Primeros 16 chars del SHA-256(password) — diagnóstico cuando falla por contraseña. */
   hashPreview?: string;
+}
+
+export type RegistroErrorCode =
+  | 'supabase_off'
+  | 'rut_empresa_existe'
+  | 'rut_usuario_existe'
+  | 'insert_empresa'
+  | 'insert_usuario'
+  | 'insert_trabajador'
+  | 'desconocido';
+
+export interface RegistroResult {
+  ok: boolean;
+  error?: RegistroErrorCode;
+  detail?: string;
 }
 
 export const [AuthProvider, useAuth] = createContextHook(() => {
@@ -85,6 +106,9 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         if (!t) return { ok: false, error: 'no_encontrado' };
         if (!t.activo) return { ok: false, error: 'bloqueado' };
         if (t.app_activa === false) return { ok: false, error: 'app_desactivada' };
+        // hash_method bcrypt → no se puede validar en cliente, derivar a la web.
+        const hashMethod = await repo.getHashMethodByRut(rut);
+        if (hashMethod === 'bcrypt') return { ok: false, error: 'usar_web' };
         const cleanPassword = password.trim();
         const passwordOk = await repo.verifyPassword(rut, cleanPassword);
         if (!passwordOk) {
@@ -161,16 +185,47 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     [],
   );
 
+  const register = useCallback(
+    async (input: RegistroAdminInput): Promise<RegistroResult> => {
+      setIsSubmitting(true);
+      try {
+        const { trabajador: t } = await registrarAdministrador(input);
+        const now = new Date();
+        const expiresAt = new Date(now);
+        expiresAt.setDate(expiresAt.getDate() + SESSION_TTL_DAYS);
+        const payload: SessionPayload = {
+          trabajadorId: t.id,
+          rut: cleanRut(t.rut),
+          loggedAt: now.toISOString(),
+          expiresAt: expiresAt.toISOString(),
+        };
+        await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(payload));
+        setTrabajador(t);
+        return { ok: true };
+      } catch (e) {
+        if (e instanceof RegistroException) {
+          return { ok: false, error: e.code, detail: e.detail };
+        }
+        console.log('[auth] register error', e);
+        const msg = e instanceof Error ? e.message : String(e);
+        return { ok: false, error: 'desconocido', detail: msg };
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [],
+  );
+
   return {
     trabajador,
     isLoading,
     isSubmitting,
     isAuthenticated: !!trabajador,
-    // La app móvil ya no tiene rol admin: todos son trabajadores. Se mantiene
-    // la propiedad por compatibilidad con pantallas existentes.
-    isAdmin: false,
+    // Si el rol del trabajador es admin/administrador exponer flag útil para UI.
+    isAdmin: trabajador?.rol === 'admin' || trabajador?.rol === 'administrador',
     login,
     logout,
+    register,
     refreshTrabajador,
     updateProfile,
     solicitarResetPassword,

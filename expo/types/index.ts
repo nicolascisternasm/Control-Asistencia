@@ -55,6 +55,8 @@ export interface PermisosTrabajador {
   puede_finanzas?: boolean;
 }
 
+export type RolUsuario = 'trabajador' | 'supervisor' | 'admin' | 'administrador';
+
 export interface Trabajador {
   id: string;
   rut: string;
@@ -67,7 +69,7 @@ export interface Trabajador {
   empresa_id?: string | null;
   supervisor_id: string | null;
   ultimo_login: string | null;
-  rol: 'trabajador' | 'supervisor' | 'admin';
+  rol: RolUsuario;
   email?: string;
   fecha_ingreso?: string | null;
   horario?: HorarioTrabajador;
@@ -75,6 +77,45 @@ export interface Trabajador {
   estado?: string;
   sueldo?: number | null;
   permisos?: PermisosTrabajador;
+  /** FK a usuarios.id si el trabajador tiene cuenta de login. */
+  usuario_id?: string | null;
+  /** Timestamps gestionados por DB. */
+  updated_at?: string | null;
+  deleted_at?: string | null;
+}
+
+export interface EmpresaTenant {
+  id: string;
+  rut: string;
+  razon_social: string;
+  nombre_fantasia?: string;
+  email_contacto: string;
+  telefono?: string;
+  activo: boolean;
+  created_at?: string;
+}
+
+export type HashMethod = 'sha256' | 'bcrypt';
+
+export interface Usuario {
+  id: string;
+  rut?: string;
+  nombre: string;
+  apellidos?: string;
+  email?: string;
+  telefono?: string;
+  rol: RolUsuario;
+  password_hash: string;
+  hash_method: HashMethod;
+  activo: boolean;
+  empresa_id?: string | null;
+  empresa_ids?: string[];
+  ultimo_acceso?: string | null;
+  reset_token?: string | null;
+  reset_token_exp?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  deleted_at?: string | null;
 }
 
 export interface Jornada {

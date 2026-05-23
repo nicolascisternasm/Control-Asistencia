@@ -28,12 +28,14 @@ import { formatRut, validateRut } from '@/utils/rut';
 const errorLabel: Record<LoginError, string> = {
   rut_invalido: 'El RUT ingresado no es válido',
   no_encontrado:
-    'No estás registrado en el sistema. Solicita a tu administrador que te registre desde el ERP.',
+    'No estás registrado en el sistema. Solicita a tu administrador que te registre o crea una cuenta nueva.',
   password_incorrecta: 'La contraseña es incorrecta',
   bloqueado:
-    'Tu cuenta está inactiva. Solicita a tu administrador que la reactive desde el ERP.',
+    'Tu cuenta está inactiva. Solicita a tu administrador que la reactive.',
   app_desactivada:
-    'No tienes habilitado el acceso a la app. Contacta a tu administrador para que active tu acceso desde el ERP.',
+    'No tienes habilitado el acceso a la app. Contacta a tu administrador.',
+  usar_web:
+    'Tu cuenta fue creada en el sistema web. Ingresa desde allí o usa “olvidé mi contraseña” en la web para recuperarla.',
 };
 
 export default function LoginScreen(): React.ReactElement {
@@ -170,6 +172,16 @@ export default function LoginScreen(): React.ReactElement {
           </TouchableOpacity>
         </View>
 
+        <TouchableOpacity
+          testID="btn-go-registro"
+          onPress={() => router.push('/registro')}
+          style={styles.registerBtn}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.registerHint}>¿Aún no tienes cuenta?</Text>
+          <Text style={styles.registerCta}>Regístrate</Text>
+        </TouchableOpacity>
+
         <Text style={styles.footer}>© 2026 ControlAsistencia</Text>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -259,6 +271,16 @@ const styles = StyleSheet.create({
   ctaText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
   forgotBtn: { alignItems: 'center', paddingVertical: 14 },
   forgotText: { color: COLORS.primary, fontSize: 14, fontWeight: '600' },
+  registerBtn: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 18,
+    marginTop: 4,
+  },
+  registerHint: { color: COLORS.textSecondary, fontSize: 14 },
+  registerCta: { color: COLORS.primary, fontSize: 14, fontWeight: '800' },
   demoCard: {
     backgroundColor: COLORS.surface,
     borderRadius: 16,

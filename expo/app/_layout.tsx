@@ -26,6 +26,7 @@ function AuthGate(): React.ReactElement {
       inTabs ||
       first === 'trabajador-form' ||
       first === 'forgot' ||
+      first === 'registro' ||
       first === 'marcacion-detail' ||
       first === 'puntos' ||
       first === 'punto-form' ||
@@ -50,6 +51,7 @@ function AuthGate(): React.ReactElement {
   return (
     <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
       <Stack.Screen name="login" />
+      <Stack.Screen name="registro" options={{ animation: 'slide_from_right' }} />
       <Stack.Screen name="forgot" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
       <Stack.Screen name="trabajador-form" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
       <Stack.Screen name="marcacion-detail" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
