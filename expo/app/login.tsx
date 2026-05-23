@@ -29,6 +29,8 @@ const errorLabel: Record<LoginError, string> = {
   rut_invalido: 'El RUT ingresado no es válido',
   no_encontrado:
     'No estás registrado en el sistema. Solicita a tu administrador que te registre o crea una cuenta nueva.',
+  no_es_trabajador:
+    'Estás registrado como usuario, pero aún no como trabajador. Contacta a tu administrador para que te registre y puedas usar esta app.',
   password_incorrecta: 'La contraseña es incorrecta',
   bloqueado:
     'Tu cuenta está inactiva. Solicita a tu administrador que la reactive.',

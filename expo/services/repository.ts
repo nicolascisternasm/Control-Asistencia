@@ -452,10 +452,17 @@ function rutVariants(rut: string): string[] {
   return Array.from(set);
 }
 
-async function fetchTrabajadorFromSupabaseByRut(rut: string): Promise<Trabajador | null> {
+export type LoginLookupStatus =
+  | { status: 'ok'; trabajador: Trabajador }
+  | { status: 'no_user' }
+  | { status: 'no_trabajador' };
+
+async function fetchTrabajadorFromSupabaseByRut(
+  rut: string,
+): Promise<LoginLookupStatus> {
   if (!SUPABASE_ENABLED || !supabase) {
     console.log('[repo] supabase deshabilitado, no se puede consultar login');
-    return null;
+    return { status: 'no_user' };
   }
   const target = cleanRut(rut);
   const variants = rutVariants(rut);
@@ -504,7 +511,7 @@ async function fetchTrabajadorFromSupabaseByRut(rut: string): Promise<Trabajador
 
   try {
     const loginRow = await findLoginRow();
-    if (!loginRow) return null;
+    if (!loginRow) return { status: 'no_user' };
 
     // El `id` de la tabla `usuarios` puede NO ser un UUID (en esta BD viene
     // como `usr-<timestamp>`), pero `solicitudes_vacaciones.trabajador_id`
@@ -512,6 +519,7 @@ async function fetchTrabajadorFromSupabaseByRut(rut: string): Promise<Trabajador
     // `trabajadores` por RUT y usamos SU id (UUID) como id del trabajador.
     let mergedRow: Record<string, unknown> = loginRow;
     let trabajadorUuid: string | null = null;
+    let hasTrabajadorRow = false;
     try {
       const { data: tRows, error: tErr } = await supabase
         .from(USUARIOS_TABLE)
@@ -535,6 +543,7 @@ async function fetchTrabajadorFromSupabaseByRut(rut: string): Promise<Trabajador
         }
       }
       if (tRow) {
+        hasTrabajadorRow = true;
         trabajadorUuid = String(tRow.id ?? '');
         // Los datos de `trabajadores` mandan (empresa/permisos), pero si
         // alguna columna clave (nombre/rol/email) viene vacía ahí, caemos
@@ -569,11 +578,16 @@ async function fetchTrabajadorFromSupabaseByRut(rut: string): Promise<Trabajador
     } catch (e) {
       console.log('[repo] lookup trabajadores by rut exception', e);
     }
+    if (!hasTrabajadorRow) {
+      console.log('[repo] usuario existe pero no tiene fila en trabajadores');
+      return { status: 'no_trabajador' };
+    }
     const mapped = mapSupabaseTrabajador(mergedRow);
-    return await resolveEmpresaAsync(mapped);
+    const resolved = await resolveEmpresaAsync(mapped);
+    return { status: 'ok', trabajador: resolved };
   } catch (e) {
     console.log('[repo] supabase login exception', e);
-    return null;
+    return { status: 'no_user' };
   }
 }
 
@@ -583,12 +597,28 @@ export const repo = {
     // 1) Fuente de verdad: tabla trabajadores en Supabase (gestionada por el ERP)
     if (SUPABASE_ENABLED) {
       const remote = await fetchTrabajadorFromSupabaseByRut(rut);
-      if (remote) return remote;
+      if (remote.status === 'ok') return remote.trabajador;
       return null;
     }
     // 2) Fallback local (modo demo sin Supabase configurado)
     const all = await ensureTrabajadoresSeeded();
     return all.find((t) => cleanRut(t.rut) === target) ?? null;
+  },
+
+  /**
+   * Variante que distingue entre "no existe el usuario" y "existe usuario
+   * pero falta la fila en trabajadores" (caso donde el admin no lo registró
+   * todavía como trabajador en el ERP).
+   */
+  async getLoginLookup(rut: string): Promise<LoginLookupStatus> {
+    if (SUPABASE_ENABLED) {
+      return await fetchTrabajadorFromSupabaseByRut(rut);
+    }
+    const target = cleanRut(rut);
+    const all = await ensureTrabajadoresSeeded();
+    const t = all.find((x) => cleanRut(x.rut) === target);
+    if (t) return { status: 'ok', trabajador: t };
+    return { status: 'no_user' };
   },
 
   async getAllTrabajadores(empresa?: string): Promise<Trabajador[]> {

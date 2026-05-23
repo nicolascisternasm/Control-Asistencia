@@ -28,6 +28,7 @@ interface SessionPayload {
 export type LoginError =
   | 'rut_invalido'
   | 'no_encontrado'
+  | 'no_es_trabajador'
   | 'password_incorrecta'
   | 'bloqueado'
   | 'app_desactivada'
@@ -102,8 +103,14 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         if (!validateRut(rut)) {
           return { ok: false, error: 'rut_invalido' };
         }
-        const t = await repo.getTrabajadorByRut(rut);
-        if (!t) return { ok: false, error: 'no_encontrado' };
+        const lookup = await repo.getLoginLookup(rut);
+        if (lookup.status === 'no_user') {
+          return { ok: false, error: 'no_encontrado' };
+        }
+        if (lookup.status === 'no_trabajador') {
+          return { ok: false, error: 'no_es_trabajador' };
+        }
+        const t = lookup.trabajador;
         if (!t.activo) return { ok: false, error: 'bloqueado' };
         if (t.app_activa === false) return { ok: false, error: 'app_desactivada' };
         // Nota: la validación soporta tanto SHA-256 (app) como bcrypt (ERP web).
