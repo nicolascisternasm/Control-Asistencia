@@ -31,11 +31,19 @@ import {
   Mail,
   Calendar,
 } from 'lucide-react-native';
-import { COLORS, HorarioTrabajador, HORARIO_DEFAULT, PuntoTrabajo, Trabajador } from '@/types';
-import { Clock3, Timer } from 'lucide-react-native';
+import { COLORS, HorarioTrabajador, HORARIO_DEFAULT, PuntoTrabajo, Trabajador, RolUsuario } from '@/types';
+import { Clock3, Timer, Smartphone, UserCog } from 'lucide-react-native';
 import { formatRut, validateRut, cleanRut } from '@/utils/rut';
 import { repo } from '@/services/repository';
 import { MapPin } from 'lucide-react-native';
+import {
+  crearUsuarioParaTrabajador,
+  setUsuarioActivo,
+  setUsuarioRol,
+  resetearPasswordUsuario,
+  RegistroException,
+} from '@/services/usuarios';
+import { useAuth } from '@/contexts/AuthContext';
 
 type Rol = Trabajador['rol'];
 
@@ -47,6 +55,7 @@ const ROLES: { key: Rol; label: string }[] = [
 
 export default function TrabajadorFormScreen(): React.ReactElement {
   const router = useRouter();
+  const { trabajador: adminUser } = useAuth();
   const { id, empresa: empresaParam } = useLocalSearchParams<{ id?: string; empresa?: string }>();
   const isEdit = !!id;
 
@@ -67,6 +76,9 @@ export default function TrabajadorFormScreen(): React.ReactElement {
   const [password2, setPassword2] = useState<string>('');
   const [showPass, setShowPass] = useState<boolean>(false);
   const [resetPass, setResetPass] = useState<boolean>(false);
+  const [usaApp, setUsaApp] = useState<boolean>(true);
+  const [usuarioId, setUsuarioId] = useState<string | null>(null);
+  const [usuarioActivo, setUsuarioActivoLocal] = useState<boolean>(true);
   const [puntos, setPuntos] = useState<PuntoTrabajo[]>([]);
   const [puntoTrabajoId, setPuntoTrabajoId] = useState<string | null>(null);
   const [horario, setHorario] = useState<HorarioTrabajador>(HORARIO_DEFAULT);
@@ -89,6 +101,9 @@ export default function TrabajadorFormScreen(): React.ReactElement {
           setRol(t.rol);
           setActivo(t.activo);
           setHorario(t.horario ?? HORARIO_DEFAULT);
+          setUsuarioId(t.usuario_id ?? null);
+          setUsuarioActivoLocal(t.app_activa ?? true);
+          setUsaApp(!!t.usuario_id);
         }
         const asig = await repo.getAsignacionActiva(id as string);
         setPuntoTrabajoId(asig?.punto_trabajo_id ?? null);
@@ -116,7 +131,7 @@ export default function TrabajadorFormScreen(): React.ReactElement {
       Alert.alert('Cargo requerido', 'Indica el cargo del trabajador');
       return;
     }
-    const willSetPassword = !isEdit || resetPass;
+    const willSetPassword = (!isEdit && usaApp) || resetPass;
     if (willSetPassword) {
       if (password.length < 4) {
         Alert.alert('Contraseña muy corta', 'La contraseña debe tener al menos 4 caracteres');
@@ -140,6 +155,7 @@ export default function TrabajadorFormScreen(): React.ReactElement {
     setSaving(true);
     try {
       let trabajadorId: string;
+      const empresaIdAdmin = adminUser?.empresa_id ?? null;
       if (isEdit) {
         await repo.updateTrabajador(id as string, {
           rut: formatRut(rut),
@@ -157,6 +173,17 @@ export default function TrabajadorFormScreen(): React.ReactElement {
         if (resetPass) {
           await repo.setPassword(cleanRut(rut), password);
           await repo.resetPasswordRemote(cleanRut(rut), password);
+          if (usuarioId) {
+            try { await resetearPasswordUsuario(usuarioId, password); } catch (e) { console.log('[trabajador-form] resetUsuario error', e); }
+          }
+        }
+        if (usuarioId) {
+          try {
+            await setUsuarioRol(usuarioId, rol as RolUsuario);
+            await setUsuarioActivo(usuarioId, usuarioActivo);
+          } catch (e) {
+            console.log('[trabajador-form] update usuario error', e);
+          }
         }
         trabajadorId = id as string;
       } else {
@@ -176,9 +203,36 @@ export default function TrabajadorFormScreen(): React.ReactElement {
           rol,
           horario,
         };
+        if (empresaIdAdmin) {
+          nuevo.empresa_id = empresaIdAdmin;
+        }
         const created = await repo.addTrabajador(nuevo);
         trabajadorId = created.id;
-        await repo.setPassword(cleanRut(rut), password);
+        if (usaApp) {
+          await repo.setPassword(cleanRut(rut), password);
+          if (empresaIdAdmin) {
+            try {
+              const u = await crearUsuarioParaTrabajador({
+                rut: cleanRut(rut),
+                nombre: `${nombres.trim()} ${apellidos.trim()}`.trim(),
+                email: emailTrim || undefined,
+                password,
+                rol: rol as RolUsuario,
+                empresa_id: empresaIdAdmin,
+              });
+              await repo.updateTrabajador(trabajadorId, { usuario_id: u.id, app_activa: true });
+            } catch (e) {
+              if (e instanceof RegistroException && e.code === 'rut_usuario_existe') {
+                Alert.alert(
+                  'Cuenta ya existe',
+                  'Ya hay una cuenta de acceso con ese RUT en el sistema. El trabajador se creó pero deberás vincularlo manualmente.',
+                );
+              } else {
+                console.log('[trabajador-form] crearUsuario error', e);
+              }
+            }
+          }
+        }
       }
       await repo.setAsignacionTrabajador(trabajadorId, puntoTrabajoId);
       router.back();
@@ -188,7 +242,7 @@ export default function TrabajadorFormScreen(): React.ReactElement {
     } finally {
       setSaving(false);
     }
-  }, [isEdit, id, rut, nombres, apellidos, telefono, cargo, empresa, email, fechaIngreso, rol, activo, router, password, password2, resetPass, puntoTrabajoId, horario]);
+  }, [isEdit, id, rut, nombres, apellidos, telefono, cargo, empresa, email, fechaIngreso, rol, activo, router, password, password2, resetPass, puntoTrabajoId, horario, usaApp, usuarioId, usuarioActivo, adminUser]);
 
   const eliminar = useCallback(() => {
     if (!isEdit) return;
@@ -653,6 +707,69 @@ export default function TrabajadorFormScreen(): React.ReactElement {
             </View>
           </View>
 
+          {!isEdit && (
+            <View style={styles.card}>
+              <View style={styles.toggleRow}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                  <View style={styles.toggleIcon}>
+                    <Smartphone size={18} color={usaApp ? COLORS.primary : COLORS.textMuted} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.toggleTitle}>¿Usará la app?</Text>
+                    <Text style={styles.toggleSub}>
+                      {usaApp ? 'Se creará cuenta de acceso con RUT y contraseña' : 'Solo se registrará como trabajador, sin acceso a la app'}
+                    </Text>
+                  </View>
+                </View>
+                <Switch
+                  value={usaApp}
+                  onValueChange={setUsaApp}
+                  trackColor={{ false: COLORS.border, true: COLORS.primary }}
+                  thumbColor="#FFFFFF"
+                  testID="switch-usa-app"
+                />
+              </View>
+            </View>
+          )}
+
+          {isEdit && usuarioId && (
+            <View style={styles.card}>
+              <Text style={styles.sectionTitle}>Acceso a la app</Text>
+              <View style={styles.toggleRow}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                  <View style={styles.toggleIcon}>
+                    <UserCog size={18} color={usuarioActivo ? COLORS.primary : COLORS.textMuted} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.toggleTitle}>Acceso habilitado</Text>
+                    <Text style={styles.toggleSub}>
+                      {usuarioActivo ? 'Puede iniciar sesión en la app' : 'No puede iniciar sesión'}
+                    </Text>
+                  </View>
+                </View>
+                <Switch
+                  value={usuarioActivo}
+                  onValueChange={setUsuarioActivoLocal}
+                  trackColor={{ false: COLORS.border, true: COLORS.primary }}
+                  thumbColor="#FFFFFF"
+                  testID="switch-usuario-activo"
+                />
+              </View>
+              <Text style={styles.helper}>
+                Los cambios de rol y de estado se aplican al guardar.
+              </Text>
+            </View>
+          )}
+
+          {isEdit && !usuarioId && (
+            <View style={styles.card}>
+              <Text style={styles.sectionTitle}>Acceso a la app</Text>
+              <Text style={styles.helper}>
+                Este trabajador no tiene cuenta de acceso a la app. Se le puede crear una desde el ERP o solicitar al administrador del sistema.
+              </Text>
+            </View>
+          )}
+
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>Acceso</Text>
 
@@ -679,7 +796,7 @@ export default function TrabajadorFormScreen(): React.ReactElement {
               </View>
             )}
 
-            {(!isEdit || resetPass) && (
+            {((!isEdit && usaApp) || resetPass) && (
               <>
                 <Text style={styles.label}>{isEdit ? 'Nueva contraseña' : 'Contraseña inicial'}</Text>
                 <View style={styles.input}>
