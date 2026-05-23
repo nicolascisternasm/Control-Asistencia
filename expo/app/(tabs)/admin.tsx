@@ -27,7 +27,7 @@ import {
   Plane,
 } from 'lucide-react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { TextInput } from 'react-native';
+import { TextInput, Modal } from 'react-native';
 import {
   COLORS,
   Marcacion,
@@ -61,6 +61,9 @@ export default function AdminScreen(): React.ReactElement {
   const [query, setQuery] = useState<string>('');
   const [pagina, setPagina] = useState<number>(1);
   const PAGE_SIZE = 10;
+  // Resolver con contraseña personalizada
+  const [resolverModal, setResolverModal] = useState<SolicitudPassword | null>(null);
+  const [customPassword, setCustomPassword] = useState<string>('');
 
   const load = useCallback(async () => {
     setRefreshing(true);
@@ -145,32 +148,54 @@ export default function AdminScreen(): React.ReactElement {
     );
   };
 
-  const resolver = async (s: SolicitudPassword, accion: 'resuelta' | 'rechazada') => {
-    Alert.alert(
-      accion === 'resuelta' ? 'Resolver solicitud' : 'Rechazar solicitud',
-      `RUT ${formatRut(s.rut)}`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Confirmar',
-          onPress: async () => {
-            await repo.updateSolicitud(s.id, {
-              estado: accion,
-              fecha_resolucion: new Date().toISOString(),
-              resuelto_por: 'admin',
-            });
-            if (accion === 'resuelta') {
-              const newPassword = generateRandomPassword();
-              await repo.setPassword(s.rut, newPassword);
-              showToast(`Nueva contraseña para ${formatRut(s.rut)}: ${newPassword}`, 'success');
-            } else {
-              showToast('Solicitud rechazada', 'info');
-            }
-            load();
-          },
+  const rechazarSolicitud = async (s: SolicitudPassword) => {
+    Alert.alert('Rechazar solicitud', `RUT ${formatRut(s.rut)}`, [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Rechazar',
+        style: 'destructive',
+        onPress: async () => {
+          await repo.updateSolicitud(s.id, {
+            estado: 'rechazada',
+            fecha_resolucion: new Date().toISOString(),
+            resuelto_por: 'admin',
+          });
+          showToast('Solicitud rechazada', 'info');
+          load();
         },
-      ],
-    );
+      },
+    ]);
+  };
+
+  const abrirResolver = (s: SolicitudPassword) => {
+    setCustomPassword('');
+    setResolverModal(s);
+  };
+
+  const confirmarResolver = async (modo: 'default' | 'random' | 'custom') => {
+    const s = resolverModal;
+    if (!s) return;
+    let newPassword: string;
+    if (modo === 'default') newPassword = '123456';
+    else if (modo === 'random') newPassword = generateRandomPassword();
+    else {
+      const v = customPassword.trim();
+      if (v.length < 4) {
+        Alert.alert('Contraseña muy corta', 'Debe tener al menos 4 caracteres.');
+        return;
+      }
+      newPassword = v;
+    }
+    await repo.updateSolicitud(s.id, {
+      estado: 'resuelta',
+      fecha_resolucion: new Date().toISOString(),
+      resuelto_por: 'admin',
+    });
+    await repo.setPassword(s.rut, newPassword);
+    showToast(`Nueva contraseña para ${formatRut(s.rut)}: ${newPassword}`, 'success');
+    setResolverModal(null);
+    setCustomPassword('');
+    load();
   };
 
   const trabajadorById = (id: string | null): Trabajador | undefined =>
@@ -292,13 +317,14 @@ export default function AdminScreen(): React.ReactElement {
                 <View style={styles.actions}>
                   <TouchableOpacity
                     style={[styles.actionBtn, { backgroundColor: COLORS.primary }]}
-                    onPress={() => resolver(s, 'resuelta')}
+                    onPress={() => abrirResolver(s)}
+                    testID={`btn-resolver-${s.id}`}
                   >
                     <Text style={styles.actionText}>Resolver</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.actionBtn, styles.actionSecondary]}
-                    onPress={() => resolver(s, 'rechazada')}
+                    onPress={() => rechazarSolicitud(s)}
                   >
                     <Text style={[styles.actionText, { color: COLORS.textSecondary }]}>
                       Rechazar
@@ -486,6 +512,12 @@ export default function AdminScreen(): React.ReactElement {
                       {t.activo ? 'Activo' : 'Bloqueado'}
                     </Text>
                   </View>
+                  {t.usuario_id ? (
+                    <View style={styles.appPill}>
+                      <KeyRound size={10} color={COLORS.primary} />
+                      <Text style={styles.appPillText}>App</Text>
+                    </View>
+                  ) : null}
                   <Pencil size={14} color={COLORS.textMuted} />
                 </View>
               </TouchableOpacity>
@@ -504,6 +536,77 @@ export default function AdminScreen(): React.ReactElement {
           </>
         )}
       </ScrollView>
+
+      <Modal
+        visible={!!resolverModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setResolverModal(null)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <View style={[styles.avatarSm, { alignSelf: 'center', marginBottom: 12 }]}>
+              <KeyRound size={18} color={COLORS.warning} />
+            </View>
+            <Text style={styles.modalTitle}>Restablecer contraseña</Text>
+            {!!resolverModal && (
+              <Text style={styles.modalSub}>RUT {formatRut(resolverModal.rut)}</Text>
+            )}
+
+            <TouchableOpacity
+              style={[styles.actionBtn, { backgroundColor: COLORS.primary, marginTop: 16 }]}
+              onPress={() => confirmarResolver('default')}
+              testID="btn-resolver-default"
+            >
+              <Text style={styles.actionText}>Usar 123456 (default)</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.actionBtn, styles.actionSecondary, { marginTop: 8 }]}
+              onPress={() => confirmarResolver('random')}
+            >
+              <Text style={[styles.actionText, { color: COLORS.textSecondary }]}>
+                Generar contraseña aleatoria
+              </Text>
+            </TouchableOpacity>
+
+            <Text style={[styles.modalSub, { marginTop: 18, marginBottom: 8 }]}>
+              O ingresa una contraseña específica:
+            </Text>
+            <View style={styles.searchBox}>
+              <KeyRound size={16} color={COLORS.textMuted} />
+              <TextInput
+                value={customPassword}
+                onChangeText={setCustomPassword}
+                placeholder="Mínimo 4 caracteres"
+                placeholderTextColor={COLORS.textMuted}
+                style={styles.searchInput}
+                autoCapitalize="none"
+                autoCorrect={false}
+                testID="input-custom-password"
+              />
+            </View>
+            <TouchableOpacity
+              style={[
+                styles.actionBtn,
+                { backgroundColor: COLORS.success, marginTop: 12 },
+                customPassword.trim().length < 4 && { opacity: 0.5 },
+              ]}
+              onPress={() => confirmarResolver('custom')}
+              disabled={customPassword.trim().length < 4}
+              testID="btn-resolver-custom"
+            >
+              <Text style={styles.actionText}>Usar esta contraseña</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={{ alignItems: 'center', paddingVertical: 14, marginTop: 4 }}
+              onPress={() => setResolverModal(null)}
+            >
+              <Text style={{ color: COLORS.textSecondary, fontWeight: '600' }}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -714,4 +817,37 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   loadMoreText: { fontSize: 13, fontWeight: '700', color: COLORS.primary },
+  appPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: COLORS.primaryLight,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  appPillText: { fontSize: 10, color: COLORS.primary, fontWeight: '700' },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15,23,42,0.5)',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  modalCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 20,
+    padding: 22,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.text,
+    textAlign: 'center',
+  },
+  modalSub: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginTop: 4,
+  },
 });

@@ -276,6 +276,10 @@ function mapSupabaseTrabajador(row: Record<string, unknown>): Trabajador {
       puede_rrhh: row.puede_rrhh === true,
       puede_finanzas: row.puede_finanzas === true,
     },
+    usuario_id:
+      (row.usuario_id as string | null) ??
+      (row.user_id as string | null) ??
+      null,
   };
 }
 
@@ -310,6 +314,7 @@ function trabajadorToRow(t: Partial<Trabajador>): Record<string, unknown> {
   if (t.estado !== undefined) row.estado = t.estado;
   if (t.app_activa !== undefined) row.app_activa = t.app_activa;
   if (t.sueldo !== undefined) row.sueldo = t.sueldo;
+  if (t.usuario_id !== undefined && t.usuario_id !== null) row.usuario_id = t.usuario_id;
   if (t.permisos) {
     if (t.permisos.puede_cotizar !== undefined) row.puede_cotizar = t.permisos.puede_cotizar;
     if (t.permisos.puede_gastos !== undefined) row.puede_gastos = t.permisos.puede_gastos;

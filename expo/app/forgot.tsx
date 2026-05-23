@@ -50,6 +50,7 @@ type Paso =
   | { tipo: 'exito' };
 
 const CODE_TTL_MS = 10 * 60 * 1000; // 10 minutos
+const RESEND_COOLDOWN_S = 60; // segundos entre reenvíos
 
 function esAdmin(t: Trabajador): boolean {
   return t.rol === 'admin' || t.rol === 'supervisor';
@@ -72,6 +73,10 @@ export default function ForgotPasswordScreen(): React.ReactElement {
   const [codigoInput, setCodigoInput] = useState<string>('');
   const [enviandoCodigo, setEnviandoCodigo] = useState<boolean>(false);
   const [verificando, setVerificando] = useState<boolean>(false);
+  /** Segundos restantes hasta que expire el código. 0 = expirado / no hay. */
+  const [segundosRestantes, setSegundosRestantes] = useState<number>(0);
+  /** Cooldown del botón "Reenviar". */
+  const [cooldownReenviar, setCooldownReenviar] = useState<number>(0);
 
   // Nueva contraseña
   const [nuevaPwd, setNuevaPwd] = useState<string>('');
@@ -86,7 +91,25 @@ export default function ForgotPasswordScreen(): React.ReactElement {
     setConfirmarPwd('');
     codigoRef.current = null;
     codigoExpiraRef.current = 0;
+    setSegundosRestantes(0);
+    setCooldownReenviar(0);
   }, []);
+
+  // Tick cada 1s mientras estamos en el paso del código para actualizar timers.
+  useEffect(() => {
+    if (paso.tipo !== 'admin-codigo') {
+      setSegundosRestantes(0);
+      return;
+    }
+    const tick = () => {
+      const rest = Math.max(0, Math.ceil((codigoExpiraRef.current - Date.now()) / 1000));
+      setSegundosRestantes(rest);
+      setCooldownReenviar((c) => (c > 0 ? c - 1 : 0));
+    };
+    tick();
+    const it = setInterval(tick, 1000);
+    return () => clearInterval(it);
+  }, [paso.tipo]);
 
   const consultar = useCallback(async () => {
     if (!validateRut(rut)) {
@@ -155,6 +178,8 @@ export default function ForgotPasswordScreen(): React.ReactElement {
           return;
         }
         setCodigoInput('');
+        setCooldownReenviar(RESEND_COOLDOWN_S);
+        setSegundosRestantes(Math.ceil(CODE_TTL_MS / 1000));
         setPaso({ tipo: 'admin-codigo', trabajador: t, emailEnviado: email });
       } finally {
         setEnviandoCodigo(false);
@@ -417,6 +442,18 @@ export default function ForgotPasswordScreen(): React.ReactElement {
                 Enviamos un código de 6 dígitos a {maskEmail(paso.emailEnviado)}. Revisa también la
                 carpeta de spam.
               </Text>
+              <View style={styles.timerBox}>
+                <Text style={styles.timerLabel}>El código expira en</Text>
+                <Text
+                  style={[
+                    styles.timerValue,
+                    segundosRestantes <= 60 && { color: COLORS.danger },
+                  ]}
+                >
+                  {Math.floor(segundosRestantes / 60).toString().padStart(2, '0')}:
+                  {(segundosRestantes % 60).toString().padStart(2, '0')}
+                </Text>
+              </View>
 
               <Text style={styles.label}>Código de verificación</Text>
               <View style={styles.input}>
@@ -447,13 +484,20 @@ export default function ForgotPasswordScreen(): React.ReactElement {
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.ctaSecondary, enviandoCodigo && styles.ctaDisabled]}
+                style={[
+                  styles.ctaSecondary,
+                  (enviandoCodigo || cooldownReenviar > 0) && styles.ctaDisabled,
+                ]}
                 onPress={() => enviarCodigo(paso.trabajador)}
-                disabled={enviandoCodigo}
+                disabled={enviandoCodigo || cooldownReenviar > 0}
                 activeOpacity={0.85}
               >
                 <Text style={styles.ctaSecondaryText}>
-                  {enviandoCodigo ? 'Reenviando...' : 'Reenviar código'}
+                  {enviandoCodigo
+                    ? 'Reenviando...'
+                    : cooldownReenviar > 0
+                    ? `Reenviar código (${cooldownReenviar}s)`
+                    : 'Reenviar código'}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -682,5 +726,24 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     color: COLORS.primary,
+  },
+  timerBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: COLORS.surfaceAlt,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginTop: 12,
+  },
+  timerLabel: { fontSize: 12, color: COLORS.textSecondary, fontWeight: '600' },
+  timerValue: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.primary,
+    fontVariant: ['tabular-nums'],
+    letterSpacing: 1,
   },
 });
