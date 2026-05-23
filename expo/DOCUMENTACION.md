@@ -1,6 +1,6 @@
 # ControlAsistencia — Documentación Técnica y Funcional
 
-Versión: 1.0
+Versión: 1.1
 Stack: Expo (React Native) + Expo Router + React Query + Supabase
 Plataformas: iOS / Android / Web
 Lenguaje: TypeScript (strict)
@@ -9,25 +9,32 @@ Lenguaje: TypeScript (strict)
 
 ## 1. Resumen ejecutivo
 
-ControlAsistencia es una aplicación móvil multiplataforma para la gestión de personal en terreno. Permite registrar asistencia con validación por geocerca, administrar gastos, solicitar vacaciones, gestionar omisión de colación y administrar trabajadores, horarios y puntos de trabajo desde un panel de administrador.
+ControlAsistencia es una aplicación móvil multiplataforma para la gestión de personal en terreno. Permite registrar asistencia con validación por geocerca, administrar gastos, solicitar vacaciones, gestionar omisión de colación y administrar trabajadores, horarios, empresas y puntos de trabajo desde un panel de administrador.
 
 Objetivos principales:
-- Asegurar que las marcaciones se realicen dentro de la ubicación asignada.
+- Asegurar que las marcaciones se realicen dentro de la ubicación asignada (geocerca).
 - Formalizar flujos de aprobación (gastos, vacaciones, omitir colación, reset de contraseña).
-- Centralizar la información en Supabase como fuente única de verdad.
+- Centralizar la información en Supabase como fuente única de verdad (compartida con el ERP).
 - Entregar a la administración una vista en tiempo real de la asistencia del equipo.
 
 ---
 
-## 2. Roles del sistema
+## 2. Roles y permisos
 
 | Rol | Descripción |
 |---|---|
 | **Trabajador** | Marca asistencia, registra gastos, solicita vacaciones y omitir colación. |
-| **Supervisor** | Mismas capacidades operativas que el trabajador. |
+| **Supervisor** | Mismas capacidades operativas que el trabajador, con acceso a vistas administrativas si el ERP así lo define. |
 | **Administrador** | Gestiona trabajadores, horarios, puntos de trabajo y todas las aprobaciones. |
 
-Matriz de permisos: ver TUTORIAL.md §2.
+Adicionalmente, cada `Trabajador` puede tener un objeto `permisos` granular (`PermisosTrabajador`):
+
+- `puede_marcaciones`, `puede_gastos`, `puede_vacaciones`, `puede_oc` (omitir colación)
+- `puede_cotizar`, `puede_rrhh`, `puede_finanzas`
+
+Estos permisos modulan qué módulos están visibles aunque el rol base sea `trabajador`.
+
+Matriz de permisos detallada: ver `TUTORIAL.md` §2.
 
 ---
 
@@ -38,9 +45,9 @@ Matriz de permisos: ver TUTORIAL.md §2.
 ```
 expo/
 ├── app/                         # Rutas (Expo Router)
-│   ├── _layout.tsx              # Root layout + providers + AuthGate
+│   ├── _layout.tsx              # Root layout + providers + AuthGate + ErrorBoundary
 │   ├── login.tsx                # Inicio de sesión por RUT
-│   ├── forgot.tsx               # Solicitud de reset de contraseña
+│   ├── forgot.tsx               # Recuperación de contraseña (flujo por rol)
 │   ├── trabajador-form.tsx      # Alta/edición de trabajador (modal)
 │   ├── marcacion-detail.tsx     # Detalle de marcación (modal)
 │   ├── puntos.tsx               # Listado de puntos de trabajo (modal)
@@ -56,29 +63,35 @@ expo/
 │       ├── asistencia-hoy.tsx   # Asistencia en vivo (admin)
 │       ├── admin.tsx            # Panel de administración
 │       └── profile.tsx          # Perfil del usuario
-├── contexts/                    # Estado global (create-context-hook)
+├── components/
+│   └── ErrorBoundary.tsx        # Captura errores de render
+├── contexts/                    # Estado global (@nkzw/create-context-hook)
 │   ├── AuthContext.tsx
 │   ├── MarcacionesContext.tsx
 │   ├── GastosContext.tsx
-│   └── VacacionesContext.tsx
+│   ├── VacacionesContext.tsx
+│   └── ToastContext.tsx
 ├── services/                    # Acceso a datos
 │   ├── supabase.ts              # Cliente Supabase
-│   ├── repository.ts            # Repositorio de trabajadores/puntos/asignaciones
-│   ├── marcaciones.ts           # CRUD marcaciones + solicitudes colación
+│   ├── repository.ts            # Trabajadores, puntos, asignaciones, empresas
+│   ├── marcaciones.ts           # CRUD marcaciones
+│   ├── omitir-colacion.ts       # Solicitudes de omitir colación
 │   ├── gastos.ts                # CRUD gastos
-│   └── vacaciones.ts            # CRUD solicitudes de vacaciones
-├── types/index.ts               # Tipos de dominio + paleta COLORS + mocks
+│   ├── vacaciones.ts            # CRUD vacaciones
+│   └── emailjs.ts               # Envío de códigos de verificación por email
+├── types/index.ts               # Tipos de dominio + paleta COLORS
+├── fixtures/mock.ts             # Datos de ejemplo
 ├── constants/colors.ts
-└── utils/                       # Utilidades (geocerca, fechas, días hábiles)
+└── utils/                       # crypto (SHA-256), geo (haversine), fecha, horas, rut
 ```
 
 ### 3.2 Navegación (Expo Router)
 
-- **Root Stack** en `app/_layout.tsx` con rutas modales (forgot, formularios, puntos, vacaciones) y tabs protegidas.
-- **AuthGate**: redirige automáticamente entre `/login` y `/(tabs)` según `isAuthenticated`.
+- **Root Stack** en `app/_layout.tsx` envuelto en `ErrorBoundary` + providers + `AuthGate`.
+- **AuthGate** redirige automáticamente entre `/login` y `/(tabs)` según `isAuthenticated`.
 - **Tabs dinámicas** en `app/(tabs)/_layout.tsx`:
   - Trabajador: Inicio, Historial, Gastos, Perfil.
-  - Admin: Panel, Asistencia hoy, Gastos, Perfil (tab "Inicio" oculta).
+  - Admin: Inicio, Historial, Asistencia hoy, Gastos, Admin, Perfil.
 
 ### 3.3 Estado global
 
@@ -86,27 +99,31 @@ expo/
 
 | Provider | Responsabilidad |
 |---|---|
-| `AuthContext` | Login por RUT, sesión persistida, logout, reset de contraseña. |
+| `AuthContext` | Login por RUT + contraseña SHA-256, sesión persistida (AsyncStorage), logout, reset de contraseña. |
 | `MarcacionesContext` | Marcaciones del día, jornada actual, solicitudes de omitir colación. |
 | `GastosContext` | Gastos del trabajador/equipo, aprobaciones. |
 | `VacacionesContext` | Solicitudes de vacaciones, validación de días hábiles, aprobaciones. |
+| `ToastContext` | Notificaciones in-app no bloqueantes. |
 
-React Query (`@tanstack/react-query`) envuelve los providers para cachear y revalidar datos de Supabase.
+React Query (`@tanstack/react-query`) es el provider top-level y cachea/revalida todos los datos de Supabase.
 
 ### 3.4 Capa de datos (Supabase)
 
 Tablas utilizadas:
 
-- `trabajadores` — usuarios del sistema con rol, horario y supervisor.
+- `usuarios` — credenciales (RUT, `password_hash` SHA-256, rol, email, `empresa_ids`).
+- `trabajadores` — datos del personal (cargo, horario, supervisor, `empresa_id`, sueldo, permisos).
+- `empresas` — catálogo de empresas (se resuelve `empresa_id` → nombre legible).
 - `puntos_trabajo` — lugares con geocerca (lat/lng/radio).
 - `asignaciones` — vínculo trabajador ↔ punto con vigencia.
 - `marcaciones` — eventos de entrada/colación/salida con geolocalización.
 - `gastos` — gastos con comprobante y estado.
-- `solicitudes_password` — solicitudes de recuperación de contraseña.
+- `solicitudes_password` — solicitudes de recuperación (solo para trabajadores comunes).
 - `solicitudes_omitir_colacion` — solicitudes para saltar colación.
 - `solicitudes_vacaciones` — solicitudes de vacaciones con rango y días hábiles.
 
 Acceso centralizado en `services/*.ts` mediante el cliente creado en `services/supabase.ts`.
+`repository.ts` mantiene un cache (5 min) de `empresas` para resolver IDs a nombres.
 
 ---
 
@@ -114,15 +131,16 @@ Acceso centralizado en `services/*.ts` mediante el cliente creado en `services/s
 
 Definido en `types/index.ts`:
 
-- `Trabajador` — incluye `HorarioTrabajador` embebido.
+- `Trabajador` — incluye `rol`, `email`, `empresa` (nombre) + `empresa_id` (FK), `sueldo`, `permisos`, `app_activa`, `estado`, `horario` embebido.
 - `HorarioTrabajador` — `hora_entrada`, `hora_salida`, `minutos_colacion`, `usa_colacion`, `horas_jornada`, `tolerancia_minutos`, `dias_laborables[]`.
+- `PermisosTrabajador` — flags granulares por módulo.
 - `PuntoTrabajo` — coordenadas y `radio_permitido_metros`.
 - `AsignacionTrabajo` — vigencia por rango de fechas.
 - `Marcacion` — `tipo_marcacion`, timestamps servidor/dispositivo, lat/lng, `distancia_al_punto`, `dentro_geocerca`, `estado_validacion` (`valida | pendiente_revision | alerta`).
-- `Gasto` — monto, moneda, `categoria`, comercio, tipo documento, `foto_url`, estado.
+- `Gasto` — monto, moneda, `categoria`, comercio, tipo documento, `foto_url`, estado, `empresa_id`.
 - `SolicitudVacaciones` — rango, `dias_habiles`, estado, comentario admin.
 - `SolicitudOmitirColacion` — por fecha y trabajador.
-- `SolicitudPassword` — por RUT + teléfono.
+- `SolicitudPassword` — por RUT + teléfono (canal de trabajadores).
 
 Todas las entidades manejan estado (`pendiente | aprobada/resuelta | rechazada`) cuando aplica.
 
@@ -132,14 +150,17 @@ Todas las entidades manejan estado (`pendiente | aprobada/resuelta | rechazada`)
 
 ### 5.1 Autenticación
 
-- **`login.tsx`**: login con RUT + contraseña. Persistencia de sesión vía AsyncStorage.
-- **`forgot.tsx`**: genera una `solicitud_password` pendiente. El admin resuelve y la contraseña vuelve a `123456`.
+- **`login.tsx`**: ingreso por RUT + contraseña. La contraseña se hashea con **SHA-256** (`utils/crypto.ts`) y se compara contra `usuarios.password_hash`. Persistencia de sesión en AsyncStorage.
+- **`forgot.tsx`**: flujo diferenciado por rol.
+  - **Admin / Supervisor**: la app muestra el email enmascarado, envía un **código de 6 dígitos por EmailJS** (TTL 10 min). Una vez verificado, el usuario define la nueva contraseña y se actualiza `password_hash` directamente en Supabase.
+  - **Trabajador**: mensaje "Contacta a tu administrador" (no expone email). El admin puede resetear desde el panel.
+  - **RUT no existe**: feedback explícito.
 
 ### 5.2 Trabajador
 
 | Pantalla | Funcionalidad |
 |---|---|
-| `(tabs)/index.tsx` | Dashboard: hora en vivo, estado jornada, geocerca, botón secuencial de marcación, solicitar no almorzar, actividad reciente. |
+| `(tabs)/index.tsx` | Dashboard: hora en vivo, estado de jornada, geocerca, botón secuencial de marcación, solicitar omitir colación, actividad reciente. |
 | `(tabs)/history.tsx` | Historial filtrable por fecha con acceso a detalle. |
 | `marcacion-detail.tsx` | Ubicación, distancia al punto, estado de validación y observaciones. |
 | `(tabs)/gastos.tsx` | Lista propia + total del mes + acceso a `gasto-form`. |
@@ -153,10 +174,10 @@ Todas las entidades manejan estado (`pendiente | aprobada/resuelta | rechazada`)
 | Pantalla | Funcionalidad |
 |---|---|
 | `(tabs)/admin.tsx` | KPIs, alertas del día, solicitudes de contraseña y de omitir colación, listado de equipo con búsqueda, alta de trabajador. |
-| `trabajador-form.tsx` | Alta/edición de trabajador + configuración completa de horario. |
-| `puntos.tsx` + `punto-form.tsx` | CRUD de puntos de trabajo con geocerca (radio en metros). |
-| `(tabs)/asistencia-hoy.tsx` | Panel en vivo de asistencia del día: presentes, atrasados, en colación, finalizados, ausentes. |
-| `(tabs)/gastos.tsx` (admin) | Aprobación/rechazo de gastos del equipo. |
+| `trabajador-form.tsx` | Alta/edición de trabajador: datos personales, rol, empresa, sueldo, **permisos granulares** y configuración completa de horario. |
+| `puntos.tsx` + `punto-form.tsx` | CRUD de puntos de trabajo con geocerca (radio en metros) y autocompletado de dirección (Google Places). |
+| `(tabs)/asistencia-hoy.tsx` | Panel en vivo: presentes, atrasados, en colación, finalizados, ausentes. |
+| `(tabs)/gastos.tsx` (admin) | Aprobación/rechazo de gastos del equipo, filtros por empresa. |
 | `vacaciones.tsx` (admin) | Tabs pendientes/aprobadas/rechazadas con aprobación y comentarios. |
 
 ---
@@ -165,7 +186,7 @@ Todas las entidades manejan estado (`pendiente | aprobada/resuelta | rechazada`)
 
 ### 6.1 Validación de marcación
 - Se obtiene ubicación (precisión alta). Si falta permiso → estado **alerta**.
-- Se calcula distancia al punto asignado (fórmula haversine en `utils/`).
+- Se calcula distancia al punto asignado (haversine en `utils/geo.ts`).
 - `distancia ≤ radio_permitido_metros` ⇒ **válida**. En caso contrario ⇒ **alerta**.
 - Observación automática generada según caso.
 
@@ -190,8 +211,16 @@ La configuración del horario define `minutos_colacion` (cantidad total), no un 
 - Una vez aprobada: botones de colación deshabilitados y jornada cuenta como HE si se cumple el horario.
 
 ### 6.7 Contraseñas
-- Contraseña inicial para todo trabajador creado: `123456`.
-- Reset administrativo devuelve la contraseña a `123456`.
+- Hash **SHA-256** hex (sin salt) — compatible con el esquema usado por el ERP que escribe en la misma tabla `usuarios`.
+- Recuperación:
+  - Admin/Supervisor: código por email (EmailJS) + reset directo desde la app.
+  - Trabajador: requiere intervención del administrador.
+- El admin puede resetear desde el panel de administración.
+
+### 6.8 Resolución de empresa
+- `trabajadores.empresa_id` guarda el **UUID** (FK a `empresas`).
+- Al leer, `repository.ts` consulta la tabla `empresas` (cache 5 min) y resuelve el nombre legible en el campo `empresa`.
+- Los filtros por empresa matchean tanto por nombre como por id para tolerar datos heredados.
 
 ---
 
@@ -216,9 +245,15 @@ Omitir colación:
 Gastos:
   Trabajador → gasto-form → estado=pendiente → Admin decide
 
-Reset de contraseña:
-  Trabajador → forgot (RUT + teléfono) → estado=pendiente
-    → Admin resuelve ⇒ password = 123456
+Reset de contraseña (Admin/Supervisor):
+  Usuario → forgot → app muestra email enmascarado
+    → EmailJS envía código (TTL 10 min)
+    → Usuario ingresa código → define nueva pass
+    → SHA-256 → UPDATE usuarios.password_hash
+
+Reset de contraseña (Trabajador):
+  Trabajador → forgot → "Contacta a tu administrador"
+    → Admin resuelve desde el panel
 ```
 
 ---
@@ -229,16 +264,20 @@ Reset de contraseña:
 - **Almacenamiento**: `AsyncStorage` en nativo; polyfill a `localStorage` en web.
 - **Cámara/foto de gasto**: `expo-image-picker` en nativo; input file en web.
 - **Haptics**: `expo-haptics` (no-op en web).
+- **Crypto (SHA-256)**: `expo-crypto` con fallback JS puro para web/tests.
 - Todas las pantallas principales verificadas en Expo Web.
 
 ---
 
 ## 9. Seguridad
 
-- Las contraseñas se almacenan hasheadas en Supabase (los servicios no exponen el hash al cliente).
-- Las operaciones críticas (aprobaciones) validan el rol antes de ejecutarse.
+- Contraseñas hasheadas (SHA-256) antes de comparar/guardar. El cliente nunca recibe el hash de otro usuario en respuestas comunes.
+- Las operaciones críticas (aprobaciones, reset) validan el rol antes de ejecutarse.
 - Las rutas protegidas se controlan en `AuthGate`.
-- Las claves públicas (`EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY`) están configuradas por entorno.
+- `ErrorBoundary` evita crash total y reporta el componente que falló.
+- Las claves públicas (`EXPO_PUBLIC_*`) son las únicas accesibles desde el bundle. No se incluyen secretos privados.
+
+> **Nota**: SHA-256 sin salt es compatible con el ERP existente, pero se recomienda migrar a bcrypt/argon2 con salt en una iteración futura (ver Roadmap).
 
 ---
 
@@ -249,6 +288,9 @@ Reset de contraseña:
 | `EXPO_PUBLIC_SUPABASE_URL` | Endpoint Supabase |
 | `EXPO_PUBLIC_SUPABASE_ANON_KEY` | Token público Supabase |
 | `EXPO_PUBLIC_GOOGLE_PLACES_API_KEY` | Autocompletado de direcciones en puntos de trabajo |
+| `EXPO_PUBLIC_EMAILJS_PUBLIC_KEY` | EmailJS — clave pública |
+| `EXPO_PUBLIC_EMAILJS_SERVICE_ID` | EmailJS — service id |
+| `EXPO_PUBLIC_EMAILJS_TEMPLATE_ID` | EmailJS — template del código de verificación |
 | `EXPO_PUBLIC_PROJECT_ID` / `EXPO_PUBLIC_TEAM_ID` | Identificadores de proyecto |
 
 ---
@@ -256,25 +298,29 @@ Reset de contraseña:
 ## 11. Mantenimiento
 
 - **Agregar una nueva entidad**: crear tipo en `types/index.ts`, servicio en `services/`, provider en `contexts/` y pantalla/formulario en `app/`.
-- **Agregar una regla de negocio**: centralizar en `utils/` para mantenerla testeable.
+- **Agregar una regla de negocio**: centralizar en `utils/` para mantenerla testeable (existen tests Jest en `utils/__tests__/`).
 - **Ajustar la paleta**: modificar `COLORS` en `types/index.ts`.
 - **Cambios en Supabase**: reflejar el esquema en los tipos de `types/index.ts` y adaptar los `services/*.ts`.
+- **Nuevos permisos granulares**: extender `PermisosTrabajador` y consumirlo en `trabajador-form.tsx` + la pantalla correspondiente.
 
 ---
 
 ## 12. Roadmap sugerido
 
-- Notificaciones push para aprobaciones.
+- Migrar hashing de contraseñas a bcrypt/argon2 con salt (coordinar con ERP).
+- Notificaciones push para aprobaciones y alertas de geocerca.
 - Exportación de reportes (Excel/PDF) de asistencia, HE y gastos.
 - Marcación offline con cola de sincronización.
 - Firma digital del comprobante de gasto.
 - Auditoría (log) de acciones administrativas.
+- Reset de contraseña self-service también para trabajadores (vía SMS o email si está disponible).
 
 ---
 
 ## 13. Referencias internas
 
 - Manual de usuario: `TUTORIAL.md`.
-- Tipos y mocks: `types/index.ts`.
+- Tipos: `types/index.ts`.
 - Servicios: `services/*.ts`.
 - Providers: `contexts/*.tsx`.
+- Utilidades testeables: `utils/` (+ `utils/__tests__/`).
