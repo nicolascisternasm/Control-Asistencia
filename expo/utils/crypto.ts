@@ -7,6 +7,7 @@
 // Todos producen el MISMO hex (64 chars lowercase), idéntico al ERP.
 
 import * as ExpoCrypto from 'expo-crypto';
+import bcrypt from 'bcryptjs';
 
 function bytesToHex(bytes: Uint8Array): string {
   let out = '';
@@ -140,6 +141,27 @@ export async function hashPassword(password: string): Promise<string> {
 
 export function isHash(value: string): boolean {
   return /^[0-9a-f]{64}$/.test(value);
+}
+
+/** Detecta si una cadena es un hash bcrypt ($2a$, $2b$, $2y$). */
+export function isBcryptHash(value: string): boolean {
+  return /^\$2[aby]\$\d{2}\$/.test(value);
+}
+
+/**
+ * Verifica una contraseña en texto plano contra un hash bcrypt.
+ * Compatible con el ERP MAMKAM (que usa bcrypt para sus usuarios web).
+ */
+export async function verifyBcrypt(
+  password: string,
+  hash: string,
+): Promise<boolean> {
+  try {
+    return await bcrypt.compare(password, hash);
+  } catch (e) {
+    console.log('[crypto] bcrypt compare error', e);
+    return false;
+  }
 }
 
 export function generateRandomPassword(length = 10): string {

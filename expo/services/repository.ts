@@ -18,7 +18,7 @@ import {
 } from '@/types';
 import { MOCK_ASIGNACIONES, MOCK_PUNTOS_TRABAJO, MOCK_TRABAJADORES } from '@/fixtures/mock';
 import { cleanRut } from '@/utils/rut';
-import { hashPassword, isHash, generateRandomPassword } from '@/utils/crypto';
+import { hashPassword, isHash, generateRandomPassword, isBcryptHash, verifyBcrypt } from '@/utils/crypto';
 import { marcacionesService } from '@/services/marcaciones';
 import { vacacionesService } from '@/services/vacaciones';
 import { omitirColacionService } from '@/services/omitir-colacion';
@@ -697,9 +697,15 @@ export const repo = {
           // `password` (texto plano) y otras veces actualiza `password_hash`.
           // Si cualquiera de los dos calza con lo ingresado, login OK.
           if (remoteHash) {
-            // a) password_hash es SHA-256 hex del input
+            // a) password_hash es bcrypt (ERP MAMKAM web)
+            if (isBcryptHash(remoteHash)) {
+              const okBcrypt = await verifyBcrypt(inputPassword, remoteHash);
+              console.log('[repo] verify bcrypt', { rut: key, ok: okBcrypt });
+              if (okBcrypt) return true;
+            }
+            // b) password_hash es SHA-256 hex del input
             if (inputHash === remoteHash.toLowerCase()) return true;
-            // b) password_hash guardado en texto plano (algunos ERPs lo hacen)
+            // c) password_hash guardado en texto plano (algunos ERPs lo hacen)
             if (inputPassword === remoteHash) return true;
             if (inputPassword.trim() === remoteHash) return true;
           }

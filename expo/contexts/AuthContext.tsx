@@ -106,9 +106,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         if (!t) return { ok: false, error: 'no_encontrado' };
         if (!t.activo) return { ok: false, error: 'bloqueado' };
         if (t.app_activa === false) return { ok: false, error: 'app_desactivada' };
-        // hash_method bcrypt → no se puede validar en cliente, derivar a la web.
-        const hashMethod = await repo.getHashMethodByRut(rut);
-        if (hashMethod === 'bcrypt') return { ok: false, error: 'usar_web' };
+        // Nota: la validación soporta tanto SHA-256 (app) como bcrypt (ERP web).
+        // El repo decide el algoritmo según el formato del hash almacenado.
         const cleanPassword = password.trim();
         const passwordOk = await repo.verifyPassword(rut, cleanPassword);
         if (!passwordOk) {
