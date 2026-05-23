@@ -1,6 +1,6 @@
 # ControlAsistencia — Manual de Usuario y Funcionalidades
 
-Versión: 1.0  
+Versión: 1.1  
 Tipo de aplicación: App móvil (iOS / Android / Web) construida con Expo + React Native  
 Persistencia: Supabase (PostgreSQL)  
 Roles: **Trabajador**, **Supervisor**, **Administrador**
@@ -16,7 +16,7 @@ ControlAsistencia es una aplicación móvil para la gestión de:
 - Solicitudes de vacaciones con validación de anticipación mínima.
 - Solicitudes para omitir colación (que cuenta como hora extra).
 - Administración de trabajadores, horarios y puntos de trabajo (geocercas).
-- Recuperación de contraseñas mediante solicitudes al admin.
+- Recuperación de contraseña diferenciada por rol: admin/supervisor con código por correo, trabajador con solicitud al administrador.
 
 La aplicación está orientada a empresas con personal en terreno que requieren control horario preciso, validación de ubicación y flujo de aprobaciones.
 
@@ -37,7 +37,8 @@ La aplicación está orientada a empresas con personal en terreno que requieren 
 | Gestionar trabajadores | ❌ | ❌ | ✅ |
 | Configurar horarios | ❌ | ❌ | ✅ |
 | Gestionar puntos de trabajo | ❌ | ❌ | ✅ |
-| Resolver solicitudes de contraseña | ❌ | ❌ | ✅ |
+| Resolver solicitudes de contraseña de trabajadores | ❌ | ❌ | ✅ |
+| Auto-recuperar contraseña por código al correo | ✅ (admin) | ✅ (supervisor) | ✅ |
 
 ---
 
@@ -48,12 +49,25 @@ La aplicación está orientada a empresas con personal en terreno que requieren 
 2. Ingresar **RUT** y **contraseña**.
 3. Presionar **Iniciar sesión**.
 
-La contraseña inicial asignada por el admin al crear un trabajador es `123456` (debe cambiarse al primer ingreso si el flujo lo exige).
+La contraseña inicial asignada por el admin al crear un trabajador es `123456` (debe cambiarse al primer ingreso si el flujo lo exige). Las contraseñas se almacenan en Supabase como **SHA-256** del texto plano (compatible con el ERP que alimenta la tabla `usuarios`).
 
 ### 3.2 Recuperar contraseña
+
+El flujo depende del **rol** del usuario asociado al RUT ingresado.
+
+#### 3.2.1 Administrador / Supervisor (auto-servicio por correo)
 1. En la pantalla de login, presionar **¿Olvidaste tu contraseña?**.
-2. Ingresar RUT y teléfono registrado.
-3. Enviar la solicitud: queda en estado **Pendiente**.
+2. Ingresar el RUT.
+3. La app muestra el **correo enmascarado** asociado al usuario (ej. `n***@gmail.com`).
+4. Presionar **Enviar código**: se envía un código de 6 dígitos al correo registrado mediante EmailJS.
+5. Ingresar el código recibido.
+6. Definir la nueva contraseña y confirmarla.
+7. La app actualiza el `password_hash` (SHA-256 de la nueva clave) en Supabase y permite iniciar sesión inmediatamente.
+
+#### 3.2.2 Trabajador
+1. En la pantalla de login, presionar **¿Olvidaste tu contraseña?**.
+2. Ingresar el RUT.
+3. La app muestra el mensaje **"Contacta a tu administrador para restablecer tu contraseña"**. Por seguridad, los trabajadores no pueden auto-resetear.
 4. El administrador la resuelve desde su panel; al aprobarla, la contraseña se restablece a `123456`.
 
 ---
@@ -246,7 +260,8 @@ Si el trabajador tiene aprobada la omisión de colación, los pasos 2 y 3 se blo
 
 - **Cliente**: Expo (React Native) con Expo Router, tabs dinámicos según rol.
 - **Estado global**: `@nkzw/create-context-hook` (AuthContext, MarcacionesContext, GastosContext, VacacionesContext).
-- **Backend**: Supabase (tablas: `trabajadores`, `marcaciones`, `puntos_trabajo`, `asignaciones`, `gastos`, `solicitudes_password`, `solicitudes_omitir_colacion`, `solicitudes_vacaciones`).
+- **Backend**: Supabase (tablas: `usuarios`, `trabajadores`, `empresas`, `marcaciones`, `puntos_trabajo`, `asignaciones`, `gastos`, `solicitudes_password`, `solicitudes_omitir_colacion`, `solicitudes_vacaciones`).
+- **Autenticación**: hashing SHA-256 (`utils/crypto.ts`); recuperación por código vía EmailJS (`services/emailjs.ts`) para admin/supervisor.
 - **Geolocalización**: `expo-location` en nativo; Geolocation API en web.
 - **Compatibilidad web**: todas las funciones principales operan en Expo Web.
 
