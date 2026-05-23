@@ -9,6 +9,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   AsignacionTrabajo,
+  HorarioTrabajador,
+  HORARIO_DEFAULT,
   Marcacion,
   PuntoTrabajo,
   SolicitudPassword,
@@ -353,6 +355,30 @@ function mapSupabaseTrabajador(row: Record<string, unknown>): Trabajador {
       (row.usuario_id as string | null) ??
       (row.user_id as string | null) ??
       null,
+    horario: parseHorario(row.horario),
+  };
+}
+
+/** Parsea el JSONB `horario` de la tabla `trabajadores`. */
+function parseHorario(raw: unknown): HorarioTrabajador | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const h = raw as Record<string, unknown>;
+  if (Object.keys(h).length === 0) return undefined;
+  const num = (v: unknown, d: number): number => {
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Number(v);
+    return d;
+  };
+  return {
+    hora_entrada: typeof h.hora_entrada === 'string' ? h.hora_entrada : HORARIO_DEFAULT.hora_entrada,
+    hora_salida: typeof h.hora_salida === 'string' ? h.hora_salida : HORARIO_DEFAULT.hora_salida,
+    minutos_colacion: num(h.minutos_colacion, HORARIO_DEFAULT.minutos_colacion),
+    usa_colacion: typeof h.usa_colacion === 'boolean' ? h.usa_colacion : HORARIO_DEFAULT.usa_colacion,
+    horas_jornada: num(h.horas_jornada, HORARIO_DEFAULT.horas_jornada),
+    tolerancia_minutos: num(h.tolerancia_minutos, HORARIO_DEFAULT.tolerancia_minutos),
+    dias_laborables: Array.isArray(h.dias_laborables)
+      ? (h.dias_laborables as unknown[]).map((x) => Number(x)).filter((x) => Number.isFinite(x))
+      : HORARIO_DEFAULT.dias_laborables,
   };
 }
 
@@ -372,6 +398,7 @@ function trabajadorToRow(t: Partial<Trabajador>): Record<string, unknown> {
   if (t.nombres !== undefined || t.apellidos !== undefined) {
     const nombre = `${t.nombres ?? ''} ${t.apellidos ?? ''}`.trim();
     if (nombre) row.nombre = nombre;
+    if (t.apellidos !== undefined) row.apellidos = t.apellidos;
   }
   if (t.telefono !== undefined) row.telefono = t.telefono;
   if (t.cargo !== undefined) row.cargo = t.cargo;
@@ -388,6 +415,9 @@ function trabajadorToRow(t: Partial<Trabajador>): Record<string, unknown> {
   if (t.app_activa !== undefined) row.app_activa = t.app_activa;
   if (t.sueldo !== undefined) row.sueldo = t.sueldo;
   if (t.usuario_id !== undefined && t.usuario_id !== null) row.usuario_id = t.usuario_id;
+  if (t.horario !== undefined) row.horario = t.horario;
+  if (t.rol !== undefined) row.rol = t.rol;
+  if (t.activo !== undefined) row.estado = t.activo ? 'activo' : 'inactivo';
   if (t.permisos) {
     if (t.permisos.puede_cotizar !== undefined) row.puede_cotizar = t.permisos.puede_cotizar;
     if (t.permisos.puede_gastos !== undefined) row.puede_gastos = t.permisos.puede_gastos;
@@ -397,6 +427,34 @@ function trabajadorToRow(t: Partial<Trabajador>): Record<string, unknown> {
     if (t.permisos.puede_rrhh !== undefined) row.puede_rrhh = t.permisos.puede_rrhh;
     if (t.permisos.puede_finanzas !== undefined) row.puede_finanzas = t.permisos.puede_finanzas;
   }
+  return row;
+}
+
+function mapPuntoRow(row: Record<string, unknown>): PuntoTrabajo {
+  const num = (v: unknown): number => {
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Number(v);
+    return 0;
+  };
+  return {
+    id: String(row.id ?? ''),
+    nombre_lugar: pickString(row, ['nombre_lugar', 'nombre']),
+    direccion: pickString(row, ['direccion']),
+    latitud: num(row.latitud),
+    longitud: num(row.longitud),
+    radio_permitido_metros: num(row.radio_permitido_metros) || 150,
+    activo: row.activo !== false,
+  };
+}
+
+function puntoToRow(p: Partial<PuntoTrabajo>): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  if (p.nombre_lugar !== undefined) row.nombre_lugar = p.nombre_lugar;
+  if (p.direccion !== undefined) row.direccion = p.direccion;
+  if (p.latitud !== undefined) row.latitud = p.latitud;
+  if (p.longitud !== undefined) row.longitud = p.longitud;
+  if (p.radio_permitido_metros !== undefined) row.radio_permitido_metros = p.radio_permitido_metros;
+  if (p.activo !== undefined) row.activo = p.activo;
   return row;
 }
 
@@ -944,21 +1002,63 @@ export const repo = {
   },
 
   async getPuntosTrabajo(): Promise<PuntoTrabajo[]> {
+    if (SUPABASE_ENABLED && supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('puntos_trabajo')
+          .select('*')
+          .limit(2000);
+        if (!error && data) {
+          const remote = (data as Record<string, unknown>[]).map(mapPuntoRow);
+          await writeJson(KEYS.puntos, remote);
+          return remote;
+        }
+        if (error) console.log('[repo] getPuntosTrabajo error', error.message);
+      } catch (e) {
+        console.log('[repo] getPuntosTrabajo exception', e);
+      }
+    }
     return await ensurePuntosSeeded();
   },
 
   async getPuntoTrabajoById(id: string): Promise<PuntoTrabajo | null> {
+    if (SUPABASE_ENABLED && supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('puntos_trabajo')
+          .select('*')
+          .eq('id', id)
+          .maybeSingle();
+        if (!error && data) return mapPuntoRow(data as Record<string, unknown>);
+      } catch (e) {
+        console.log('[repo] getPuntoTrabajoById exception', e);
+      }
+    }
     const all = await ensurePuntosSeeded();
     return all.find((p) => p.id === id) ?? null;
   },
 
   async addPuntoTrabajo(p: PuntoTrabajo): Promise<void> {
+    if (SUPABASE_ENABLED && supabase) {
+      const row = puntoToRow(p);
+      const { error } = await supabase.from('puntos_trabajo').insert(row);
+      if (error) throw new Error(`Supabase: ${error.message}`);
+      return;
+    }
     const all = await ensurePuntosSeeded();
     all.push(p);
     await writeJson(KEYS.puntos, all);
   },
 
   async updatePuntoTrabajo(id: string, patch: Partial<PuntoTrabajo>): Promise<void> {
+    if (SUPABASE_ENABLED && supabase) {
+      const { error } = await supabase
+        .from('puntos_trabajo')
+        .update(puntoToRow(patch))
+        .eq('id', id);
+      if (error) throw new Error(`Supabase: ${error.message}`);
+      return;
+    }
     const all = await ensurePuntosSeeded();
     const idx = all.findIndex((x) => x.id === id);
     if (idx < 0) throw new Error('Punto de trabajo no encontrado');
@@ -967,6 +1067,20 @@ export const repo = {
   },
 
   async deletePuntoTrabajo(id: string): Promise<void> {
+    if (SUPABASE_ENABLED && supabase) {
+      const { data: asigData } = await supabase
+        .from('asignaciones_trabajo')
+        .select('id')
+        .eq('punto_trabajo_id', id)
+        .eq('activo', true)
+        .limit(1);
+      if (asigData && asigData.length > 0) {
+        throw new Error('No se puede eliminar: hay trabajadores asignados a este punto');
+      }
+      const { error } = await supabase.from('puntos_trabajo').delete().eq('id', id);
+      if (error) throw new Error(`Supabase: ${error.message}`);
+      return;
+    }
     const all = await ensurePuntosSeeded();
     const asignaciones = await ensureAsignacionesSeeded();
     const enUso = asignaciones.some((a) => a.punto_trabajo_id === id && a.activo);
@@ -978,6 +1092,25 @@ export const repo = {
   },
 
   async getPuntoAsignado(trabajadorId: string): Promise<PuntoTrabajo | null> {
+    if (SUPABASE_ENABLED && supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('asignaciones_trabajo')
+          .select('*, puntos_trabajo!inner(*)')
+          .eq('trabajador_id', trabajadorId)
+          .eq('activo', true)
+          .limit(1);
+        if (!error && data && data.length > 0) {
+          const row = data[0] as Record<string, unknown>;
+          const punto = row.puntos_trabajo as Record<string, unknown> | null;
+          if (punto) return mapPuntoRow(punto);
+        }
+        if (error) console.log('[repo] getPuntoAsignado error', error.message);
+      } catch (e) {
+        console.log('[repo] getPuntoAsignado exception', e);
+      }
+      return null;
+    }
     const [asignaciones, puntos] = await Promise.all([
       ensureAsignacionesSeeded(),
       ensurePuntosSeeded(),
@@ -992,6 +1125,30 @@ export const repo = {
   async getAsignacionActiva(
     trabajadorId: string,
   ): Promise<AsignacionTrabajo | null> {
+    if (SUPABASE_ENABLED && supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('asignaciones_trabajo')
+          .select('*')
+          .eq('trabajador_id', trabajadorId)
+          .eq('activo', true)
+          .limit(1);
+        if (!error && data && data.length > 0) {
+          const r = data[0] as Record<string, unknown>;
+          return {
+            id: String(r.id ?? ''),
+            trabajador_id: String(r.trabajador_id ?? ''),
+            punto_trabajo_id: String(r.punto_trabajo_id ?? ''),
+            fecha_desde: String(r.fecha_desde ?? ''),
+            fecha_hasta: (r.fecha_hasta as string | null) ?? null,
+            activo: r.activo !== false,
+          };
+        }
+      } catch (e) {
+        console.log('[repo] getAsignacionActiva exception', e);
+      }
+      return null;
+    }
     const asignaciones = await ensureAsignacionesSeeded();
     return (
       asignaciones.find((a) => a.trabajador_id === trabajadorId && a.activo) ??
@@ -1003,11 +1160,55 @@ export const repo = {
     trabajadorId: string,
     puntoTrabajoId: string | null,
   ): Promise<void> {
+    const today = new Date().toISOString().slice(0, 10);
+    if (SUPABASE_ENABLED && supabase) {
+      try {
+        // 1) Si ya existe una asignación activa con el mismo punto, no hacemos nada.
+        const { data: activas } = await supabase
+          .from('asignaciones_trabajo')
+          .select('id, punto_trabajo_id')
+          .eq('trabajador_id', trabajadorId)
+          .eq('activo', true);
+        const activasArr = (activas ?? []) as Record<string, unknown>[];
+        const yaTiene = puntoTrabajoId
+          ? activasArr.find((a) => String(a.punto_trabajo_id) === puntoTrabajoId)
+          : null;
+
+        // 2) Cerrar todas las asignaciones activas que no coincidan.
+        const idsACerrar = activasArr
+          .filter((a) => !puntoTrabajoId || String(a.punto_trabajo_id) !== puntoTrabajoId)
+          .map((a) => String(a.id));
+        if (idsACerrar.length > 0) {
+          const { error: closeErr } = await supabase
+            .from('asignaciones_trabajo')
+            .update({ activo: false, fecha_hasta: today })
+            .in('id', idsACerrar);
+          if (closeErr) throw new Error(`Supabase: ${closeErr.message}`);
+        }
+
+        // 3) Crear nueva si corresponde.
+        if (puntoTrabajoId && !yaTiene) {
+          const { error: insErr } = await supabase
+            .from('asignaciones_trabajo')
+            .insert({
+              trabajador_id: trabajadorId,
+              punto_trabajo_id: puntoTrabajoId,
+              fecha_desde: today,
+              fecha_hasta: null,
+              activo: true,
+            });
+          if (insErr) throw new Error(`Supabase: ${insErr.message}`);
+        }
+        return;
+      } catch (e) {
+        console.log('[repo] setAsignacionTrabajador exception', e);
+        throw e;
+      }
+    }
     const asignaciones = await ensureAsignacionesSeeded();
-    const now = new Date().toISOString().slice(0, 10);
     const next = asignaciones.map((a) =>
       a.trabajador_id === trabajadorId && a.activo
-        ? { ...a, activo: false, fecha_hasta: now }
+        ? { ...a, activo: false, fecha_hasta: today }
         : a,
     );
     if (puntoTrabajoId) {
@@ -1015,7 +1216,7 @@ export const repo = {
         id: `a-${Date.now()}`,
         trabajador_id: trabajadorId,
         punto_trabajo_id: puntoTrabajoId,
-        fecha_desde: now,
+        fecha_desde: today,
         fecha_hasta: null,
         activo: true,
       });

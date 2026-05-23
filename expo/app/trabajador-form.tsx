@@ -23,16 +23,15 @@ import {
   Building2,
   Save,
   Trash2,
-  ShieldCheck,
+  Smartphone as AppIcon,
   Lock,
   Eye,
   EyeOff,
-  KeyRound,
   Mail,
   Calendar,
 } from 'lucide-react-native';
 import { COLORS, HorarioTrabajador, HORARIO_DEFAULT, PuntoTrabajo, Trabajador, RolUsuario } from '@/types';
-import { Clock3, Timer, Smartphone, UserCog } from 'lucide-react-native';
+import { Clock3, Timer, Smartphone } from 'lucide-react-native';
 import { formatRut, validateRut, cleanRut } from '@/utils/rut';
 import { repo } from '@/services/repository';
 import { MapPin } from 'lucide-react-native';
@@ -40,7 +39,6 @@ import {
   crearUsuarioParaTrabajador,
   setUsuarioActivo,
   setUsuarioRol,
-  resetearPasswordUsuario,
   RegistroException,
 } from '@/services/usuarios';
 import { useAuth } from '@/contexts/AuthContext';
@@ -75,10 +73,8 @@ export default function TrabajadorFormScreen(): React.ReactElement {
   const [password, setPassword] = useState<string>('');
   const [password2, setPassword2] = useState<string>('');
   const [showPass, setShowPass] = useState<boolean>(false);
-  const [resetPass, setResetPass] = useState<boolean>(false);
   const [usaApp, setUsaApp] = useState<boolean>(true);
   const [usuarioId, setUsuarioId] = useState<string | null>(null);
-  const [usuarioActivo, setUsuarioActivoLocal] = useState<boolean>(true);
   const [puntos, setPuntos] = useState<PuntoTrabajo[]>([]);
   const [puntoTrabajoId, setPuntoTrabajoId] = useState<string | null>(null);
   const [horario, setHorario] = useState<HorarioTrabajador>(HORARIO_DEFAULT);
@@ -99,10 +95,9 @@ export default function TrabajadorFormScreen(): React.ReactElement {
           setEmail(t.email ?? '');
           setFechaIngreso(t.fecha_ingreso ?? '');
           setRol(t.rol);
-          setActivo(t.activo);
+          setActivo(t.app_activa ?? t.activo ?? true);
           setHorario(t.horario ?? HORARIO_DEFAULT);
           setUsuarioId(t.usuario_id ?? null);
-          setUsuarioActivoLocal(t.app_activa ?? true);
           setUsaApp(!!t.usuario_id);
         }
         const asig = await repo.getAsignacionActiva(id as string);
@@ -131,7 +126,7 @@ export default function TrabajadorFormScreen(): React.ReactElement {
       Alert.alert('Cargo requerido', 'Indica el cargo del trabajador');
       return;
     }
-    const willSetPassword = (!isEdit && usaApp) || resetPass;
+    const willSetPassword = !isEdit && usaApp;
     if (willSetPassword) {
       if (password.length < 4) {
         Alert.alert('Contraseña muy corta', 'La contraseña debe tener al menos 4 caracteres');
@@ -156,6 +151,7 @@ export default function TrabajadorFormScreen(): React.ReactElement {
     try {
       let trabajadorId: string;
       const empresaIdAdmin = adminUser?.empresa_id ?? null;
+      const editingSelf = isEdit && adminUser?.id === id;
       if (isEdit) {
         await repo.updateTrabajador(id as string, {
           rut: formatRut(rut),
@@ -167,20 +163,16 @@ export default function TrabajadorFormScreen(): React.ReactElement {
           email: emailTrim || undefined,
           fecha_ingreso: fechaTrim || null,
           rol,
-          activo,
+          // El admin no puede cambiar su propio acceso desde la app.
+          ...(editingSelf ? {} : { activo, app_activa: activo }),
           horario,
         });
-        if (resetPass) {
-          await repo.setPassword(cleanRut(rut), password);
-          await repo.resetPasswordRemote(cleanRut(rut), password);
-          if (usuarioId) {
-            try { await resetearPasswordUsuario(usuarioId, password); } catch (e) { console.log('[trabajador-form] resetUsuario error', e); }
-          }
-        }
         if (usuarioId) {
           try {
             await setUsuarioRol(usuarioId, rol as RolUsuario);
-            await setUsuarioActivo(usuarioId, usuarioActivo);
+            if (!editingSelf) {
+              await setUsuarioActivo(usuarioId, activo);
+            }
           } catch (e) {
             console.log('[trabajador-form] update usuario error', e);
           }
@@ -242,7 +234,7 @@ export default function TrabajadorFormScreen(): React.ReactElement {
     } finally {
       setSaving(false);
     }
-  }, [isEdit, id, rut, nombres, apellidos, telefono, cargo, empresa, email, fechaIngreso, rol, activo, router, password, password2, resetPass, puntoTrabajoId, horario, usaApp, usuarioId, usuarioActivo, adminUser]);
+  }, [isEdit, id, rut, nombres, apellidos, telefono, cargo, empresa, email, fechaIngreso, rol, activo, router, password, password2, puntoTrabajoId, horario, usaApp, usuarioId, adminUser]);
 
   const eliminar = useCallback(() => {
     if (!isEdit) return;
@@ -684,28 +676,31 @@ export default function TrabajadorFormScreen(): React.ReactElement {
             </View>
           </View>
 
-          <View style={styles.card}>
-            <View style={styles.toggleRow}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
-                <View style={styles.toggleIcon}>
-                  <ShieldCheck size={18} color={activo ? COLORS.success : COLORS.textMuted} />
+          {(!isEdit || adminUser?.id !== id) && (
+            <View style={styles.card}>
+              <Text style={styles.sectionTitle}>Acceso a la app</Text>
+              <View style={styles.toggleRow}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                  <View style={styles.toggleIcon}>
+                    <AppIcon size={18} color={activo ? COLORS.primary : COLORS.textMuted} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.toggleTitle}>Cuenta activa</Text>
+                    <Text style={styles.toggleSub}>
+                      {activo ? 'Puede iniciar sesión en la app' : 'Acceso a la app bloqueado'}
+                    </Text>
+                  </View>
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.toggleTitle}>Cuenta activa</Text>
-                  <Text style={styles.toggleSub}>
-                    {activo ? 'Puede iniciar sesión y marcar' : 'Acceso bloqueado'}
-                  </Text>
-                </View>
+                <Switch
+                  value={activo}
+                  onValueChange={setActivo}
+                  trackColor={{ false: COLORS.border, true: COLORS.primary }}
+                  thumbColor="#FFFFFF"
+                  testID="switch-activo"
+                />
               </View>
-              <Switch
-                value={activo}
-                onValueChange={setActivo}
-                trackColor={{ false: COLORS.border, true: COLORS.primary }}
-                thumbColor="#FFFFFF"
-                testID="switch-activo"
-              />
             </View>
-          </View>
+          )}
 
           {!isEdit && (
             <View style={styles.card}>
@@ -732,124 +727,67 @@ export default function TrabajadorFormScreen(): React.ReactElement {
             </View>
           )}
 
-          {isEdit && usuarioId && (
+          {isEdit && (
             <View style={styles.card}>
-              <Text style={styles.sectionTitle}>Acceso a la app</Text>
-              <View style={styles.toggleRow}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
-                  <View style={styles.toggleIcon}>
-                    <UserCog size={18} color={usuarioActivo ? COLORS.primary : COLORS.textMuted} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.toggleTitle}>Acceso habilitado</Text>
-                    <Text style={styles.toggleSub}>
-                      {usuarioActivo ? 'Puede iniciar sesión en la app' : 'No puede iniciar sesión'}
-                    </Text>
-                  </View>
-                </View>
-                <Switch
-                  value={usuarioActivo}
-                  onValueChange={setUsuarioActivoLocal}
-                  trackColor={{ false: COLORS.border, true: COLORS.primary }}
-                  thumbColor="#FFFFFF"
-                  testID="switch-usuario-activo"
-                />
-              </View>
+              <Text style={styles.sectionTitle}>Contraseña</Text>
               <Text style={styles.helper}>
-                Los cambios de rol y de estado se aplican al guardar.
+                Para restablecer la contraseña usa el ERP. Por ahora la app no permite cambiarla.
               </Text>
             </View>
           )}
 
-          {isEdit && !usuarioId && (
+          {!isEdit && usaApp && (
             <View style={styles.card}>
-              <Text style={styles.sectionTitle}>Acceso a la app</Text>
-              <Text style={styles.helper}>
-                Este trabajador no tiene cuenta de acceso a la app. Se le puede crear una desde el ERP o solicitar al administrador del sistema.
-              </Text>
-            </View>
-          )}
+              <Text style={styles.sectionTitle}>Contraseña inicial</Text>
+              <Text style={styles.label}>Contraseña</Text>
+              <View style={styles.input}>
+                <Lock size={18} color={COLORS.textMuted} />
+                <TextInput
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder="Mínimo 4 caracteres"
+                  placeholderTextColor={COLORS.textMuted}
+                  style={styles.inputText}
+                  secureTextEntry={!showPass}
+                  autoCapitalize="none"
+                  testID="input-password"
+                />
+                <TouchableOpacity onPress={() => setShowPass((v) => !v)} hitSlop={10} testID="btn-toggle-pass">
+                  {showPass ? (
+                    <EyeOff size={18} color={COLORS.textMuted} />
+                  ) : (
+                    <Eye size={18} color={COLORS.textMuted} />
+                  )}
+                </TouchableOpacity>
+              </View>
 
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Acceso</Text>
-
-            {isEdit && (
-              <View style={styles.toggleRow}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
-                  <View style={styles.toggleIcon}>
-                    <KeyRound size={18} color={resetPass ? COLORS.primary : COLORS.textMuted} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.toggleTitle}>Restablecer contraseña</Text>
-                    <Text style={styles.toggleSub}>
-                      {resetPass ? 'Se cambiará por la nueva contraseña' : 'La contraseña actual se mantiene'}
-                    </Text>
-                  </View>
-                </View>
-                <Switch
-                  value={resetPass}
-                  onValueChange={setResetPass}
-                  trackColor={{ false: COLORS.border, true: COLORS.primary }}
-                  thumbColor="#FFFFFF"
-                  testID="switch-reset-pass"
+              <Text style={styles.label}>Confirmar contraseña</Text>
+              <View style={styles.input}>
+                <Lock size={18} color={COLORS.textMuted} />
+                <TextInput
+                  value={password2}
+                  onChangeText={setPassword2}
+                  placeholder="Repite la contraseña"
+                  placeholderTextColor={COLORS.textMuted}
+                  style={styles.inputText}
+                  secureTextEntry={!showPass}
+                  autoCapitalize="none"
+                  testID="input-password2"
                 />
               </View>
-            )}
 
-            {((!isEdit && usaApp) || resetPass) && (
-              <>
-                <Text style={styles.label}>{isEdit ? 'Nueva contraseña' : 'Contraseña inicial'}</Text>
-                <View style={styles.input}>
-                  <Lock size={18} color={COLORS.textMuted} />
-                  <TextInput
-                    value={password}
-                    onChangeText={setPassword}
-                    placeholder="Mínimo 4 caracteres"
-                    placeholderTextColor={COLORS.textMuted}
-                    style={styles.inputText}
-                    secureTextEntry={!showPass}
-                    autoCapitalize="none"
-                    testID="input-password"
-                  />
-                  <TouchableOpacity onPress={() => setShowPass((v) => !v)} hitSlop={10} testID="btn-toggle-pass">
-                    {showPass ? (
-                      <EyeOff size={18} color={COLORS.textMuted} />
-                    ) : (
-                      <Eye size={18} color={COLORS.textMuted} />
-                    )}
-                  </TouchableOpacity>
-                </View>
-
-                <Text style={styles.label}>Confirmar contraseña</Text>
-                <View style={styles.input}>
-                  <Lock size={18} color={COLORS.textMuted} />
-                  <TextInput
-                    value={password2}
-                    onChangeText={setPassword2}
-                    placeholder="Repite la contraseña"
-                    placeholderTextColor={COLORS.textMuted}
-                    style={styles.inputText}
-                    secureTextEntry={!showPass}
-                    autoCapitalize="none"
-                    testID="input-password2"
-                  />
-                </View>
-
-                {!isEdit && (
-                  <TouchableOpacity
-                    onPress={() => {
-                      setPassword('123456');
-                      setPassword2('123456');
-                    }}
-                    style={styles.suggestBtn}
-                    testID="btn-suggest-pass"
-                  >
-                    <Text style={styles.suggestText}>Usar contraseña por defecto 123456</Text>
-                  </TouchableOpacity>
-                )}
-              </>
-            )}
-          </View>
+              <TouchableOpacity
+                onPress={() => {
+                  setPassword('123456');
+                  setPassword2('123456');
+                }}
+                style={styles.suggestBtn}
+                testID="btn-suggest-pass"
+              >
+                <Text style={styles.suggestText}>Usar contraseña por defecto 123456</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </ScrollView>
 
         <View style={styles.footer}>
