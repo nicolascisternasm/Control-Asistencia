@@ -22,20 +22,20 @@ function AuthGate(): React.ReactElement {
     if (isLoading) return;
     const first = segments[0] as string | undefined;
     const inTabs = first === '(tabs)';
+    const inPublicAuthRoute =
+      first === 'login' || first === 'registro' || first === 'forgot';
     const inAuthedRoute =
       inTabs ||
       first === 'trabajador-form' ||
-      first === 'forgot' ||
-      first === 'registro' ||
       first === 'marcacion-detail' ||
       first === 'puntos' ||
       first === 'punto-form' ||
       first === 'gasto-form' ||
       first === 'vacaciones' ||
       first === 'vacacion-form';
-    if (isAuthenticated && !inAuthedRoute) {
+    if (isAuthenticated && !inAuthedRoute && !(first === 'forgot')) {
       router.replace('/(tabs)');
-    } else if (!isAuthenticated && inTabs) {
+    } else if (!isAuthenticated && !inPublicAuthRoute) {
       router.replace('/login');
     }
   }, [isAuthenticated, isLoading, segments, router]);
