@@ -143,7 +143,11 @@ export default function DashboardScreen(): React.ReactElement {
     setTimeout(() => setFeedback(null), 4000);
   };
 
-  const nombre = trabajador?.nombres.split(' ')[0] ?? '';
+  // Mostrar nombre + apellido tal como viene de `usuarios` (lo mantiene el ERP).
+  // Usamos solo el primer nombre y el primer apellido para que quepa en el hero.
+  const primerNombre = (trabajador?.nombres ?? '').trim().split(/\s+/)[0] ?? '';
+  const primerApellido = (trabajador?.apellidos ?? '').trim().split(/\s+/)[0] ?? '';
+  const nombre = [primerNombre, primerApellido].filter(Boolean).join(' ');
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>

@@ -205,11 +205,29 @@ function pickString(row: Record<string, unknown>, keys: string[]): string {
 }
 
 function mapSupabaseTrabajador(row: Record<string, unknown>): Trabajador {
-  // Soporta tanto el schema nuevo (`nombre` único) como el legacy (`nombres`/`apellidos`).
+  // Soporta varios esquemas:
+  // - ERP `usuarios`: columnas `nombre` (pila/primer nombre) y `apellido` (singular)
+  // - Legacy: `nombres` (plural) + `apellidos` (plural)
+  // - Otros: `nombre_completo` / `full_name` (uno solo, hay que dividir)
   let nombres = pickString(row, ['nombres', 'first_name', 'firstName']);
   let apellidos = pickString(row, ['apellidos', 'apellido', 'last_name', 'lastName']);
+  // Si `nombres` está vacío pero existe la columna `nombre` (singular del ERP), usarla.
+  if (!nombres) {
+    const nombreSingular = pickString(row, ['nombre']);
+    if (nombreSingular) {
+      // Si además ya tenemos `apellidos`, asumimos que `nombre` es solo el primer nombre.
+      // Si no, intentamos dividir por si vino el nombre completo en esa columna.
+      if (apellidos) {
+        nombres = nombreSingular;
+      } else {
+        const split = splitNombreCompleto(nombreSingular);
+        nombres = split.nombres;
+        apellidos = split.apellidos;
+      }
+    }
+  }
   if (!nombres && !apellidos) {
-    const full = pickString(row, ['nombre', 'nombre_completo', 'full_name']);
+    const full = pickString(row, ['nombre_completo', 'full_name']);
     const split = splitNombreCompleto(full);
     nombres = split.nombres;
     apellidos = split.apellidos;
@@ -467,15 +485,18 @@ async function fetchTrabajadorFromSupabaseByRut(rut: string): Promise<Trabajador
           if (av) return a;
           return b;
         };
+        // Para nombre/apellido la fuente preferida es `usuarios` (la mantiene el ERP).
+        // Si esa columna está vacía caemos a la fila de `trabajadores`.
         mergedRow = {
           ...tRow,
           id: trabajadorUuid,
           rut: pickNonEmpty(tRow.rut, loginRow.rut),
           rol: pickNonEmpty(tRow.rol, loginRow.rol) ?? null,
-          email: pickNonEmpty(tRow.email, loginRow.email) ?? null,
-          nombre: pickNonEmpty(tRow.nombre, loginRow.nombre) ?? null,
-          nombres: pickNonEmpty(tRow.nombres, loginRow.nombres) ?? null,
-          apellidos: pickNonEmpty(tRow.apellidos, loginRow.apellidos) ?? null,
+          email: pickNonEmpty(loginRow.email, tRow.email) ?? null,
+          nombre: pickNonEmpty(loginRow.nombre, tRow.nombre) ?? null,
+          apellido: pickNonEmpty(loginRow.apellido, tRow.apellido) ?? null,
+          nombres: pickNonEmpty(loginRow.nombres, tRow.nombres) ?? null,
+          apellidos: pickNonEmpty(loginRow.apellidos, tRow.apellidos) ?? null,
           telefono: pickNonEmpty(tRow.telefono, loginRow.telefono) ?? null,
         };
       } else if (tErr) {
