@@ -252,7 +252,12 @@ function mapSupabaseTrabajador(row: Record<string, unknown>): Trabajador {
     empresa_id: pickString(row, ['empresa_id', 'empresa', 'company']) || null,
     supervisor_id: (row.supervisor_id as string | null) ?? null,
     ultimo_login: (row.ultimo_login as string | null) ?? (row.last_login as string | null) ?? null,
-    rol: 'trabajador',
+    rol: (() => {
+      const r = pickString(row, ['rol', 'role', 'tipo', 'tipo_usuario']).toLowerCase();
+      if (r === 'admin' || r === 'administrador') return 'admin';
+      if (r === 'supervisor') return 'supervisor';
+      return 'trabajador';
+    })(),
     email: pickString(row, ['email', 'correo', 'mail', 'email_address']),
     fecha_ingreso:
       (row.fecha_ingreso as string | null) ??
@@ -450,10 +455,14 @@ async function fetchTrabajadorFromSupabaseByRut(rut: string): Promise<Trabajador
         trabajadorUuid = String(tRow.id ?? '');
         // Los datos de `trabajadores` mandan (nombre/empresa/permisos);
         // el id queda como el UUID de `trabajadores`, no el de `usuarios`.
+        // Pero el `rol` y el `email` viven en `usuarios`, así que los
+        // preservamos desde loginRow si trabajadores no los trae.
         mergedRow = {
           ...tRow,
           id: trabajadorUuid,
           rut: tRow.rut ?? loginRow.rut,
+          rol: tRow.rol ?? loginRow.rol ?? null,
+          email: tRow.email ?? loginRow.email ?? null,
         };
       } else if (tErr) {
         console.log('[repo] lookup trabajadores by rut error', tErr.message);
