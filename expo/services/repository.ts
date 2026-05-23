@@ -198,6 +198,51 @@ function resolveEmpresa(t: Trabajador, empresasMap: Map<string, string>): Trabaj
   return { ...t, empresa_id: rawId };
 }
 
+/**
+ * Versión async: si el id no está en el cache, consulta directamente
+ * `empresas_tenant` y `empresas` por id. Útil cuando el cache está vacío
+ * por RLS o por timing tras un registro recién hecho.
+ */
+async function resolveEmpresaAsync(t: Trabajador): Promise<Trabajador> {
+  const rawId = (t.empresa_id ?? t.empresa ?? '').toString();
+  if (!rawId) return t;
+  const map = await fetchEmpresasMap();
+  let nombre = map.get(rawId);
+  if (!nombre && SUPABASE_ENABLED && supabase) {
+    for (const table of EMPRESAS_TABLES) {
+      try {
+        const { data, error } = await supabase
+          .from(table)
+          .select('*')
+          .eq('id', rawId)
+          .limit(1);
+        if (error) {
+          console.log('[repo] resolveEmpresaAsync error', table, error.message);
+          continue;
+        }
+        const row = (data as Record<string, unknown>[] | null)?.[0];
+        if (!row) continue;
+        const n = pickString(row, [
+          'nombre_fantasia',
+          'razon_social',
+          'nombre',
+          'name',
+          'rut',
+        ]);
+        if (n) {
+          nombre = n;
+          map.set(rawId, n);
+          break;
+        }
+      } catch (e) {
+        console.log('[repo] resolveEmpresaAsync exception', table, e);
+      }
+    }
+  }
+  if (nombre) return { ...t, empresa_id: rawId, empresa: nombre };
+  return { ...t, empresa_id: rawId };
+}
+
 /** Divide "Camila Almonte Soto" -> { nombres: 'Camila', apellidos: 'Almonte Soto' }. */
 function splitNombreCompleto(full: string): { nombres: string; apellidos: string } {
   const parts = (full ?? '').trim().split(/\s+/).filter(Boolean);
@@ -495,7 +540,8 @@ async function fetchTrabajadorFromSupabaseByRut(rut: string): Promise<Trabajador
           if (av) return a;
           return b;
         };
-        // Para nombre/apellido la fuente preferida es `usuarios` (la mantiene el ERP).
+        // Para nombre/apellido y empresa, la fuente preferida es `usuarios`
+        // (la mantiene el ERP y guarda el FK a `empresas_tenant`).
         // Si esa columna está vacía caemos a la fila de `trabajadores`.
         mergedRow = {
           ...tRow,
@@ -508,6 +554,7 @@ async function fetchTrabajadorFromSupabaseByRut(rut: string): Promise<Trabajador
           nombres: pickNonEmpty(loginRow.nombres, tRow.nombres) ?? null,
           apellidos: pickNonEmpty(loginRow.apellidos, tRow.apellidos) ?? null,
           telefono: pickNonEmpty(tRow.telefono, loginRow.telefono) ?? null,
+          empresa_id: pickNonEmpty(loginRow.empresa_id, tRow.empresa_id) ?? null,
         };
       } else if (tErr) {
         console.log('[repo] lookup trabajadores by rut error', tErr.message);
@@ -518,8 +565,7 @@ async function fetchTrabajadorFromSupabaseByRut(rut: string): Promise<Trabajador
       console.log('[repo] lookup trabajadores by rut exception', e);
     }
     const mapped = mapSupabaseTrabajador(mergedRow);
-    const empresasMap = await fetchEmpresasMap();
-    return resolveEmpresa(mapped, empresasMap);
+    return await resolveEmpresaAsync(mapped);
   } catch (e) {
     console.log('[repo] supabase login exception', e);
     return null;
