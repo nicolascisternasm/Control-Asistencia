@@ -618,29 +618,40 @@ export const repo = {
           }
         }
         if (row) {
-          const remoteHash = (row.password_hash as string | null) ?? null;
-          const remotePlain = (row.password as string | null) ?? null;
+          const rawHash = (row.password_hash as string | null) ?? null;
+          const rawPlain = (row.password as string | null) ?? null;
+          // Normalizar: quitar espacios/saltos de línea invisibles (común en
+          // imports CSV/Excel del ERP) y pasar a lowercase para comparar hex.
+          const remoteHash = rawHash ? String(rawHash).trim() : null;
+          const remotePlain = rawPlain ? String(rawPlain).trim() : null;
           const inputHash = await hashPassword(inputPassword);
           console.log('[repo] verify supabase', {
             rut: key,
+            rutInRow: row.rut,
             hasHash: !!remoteHash,
             hasPlain: !!remotePlain,
-            hashLen: remoteHash ? String(remoteHash).length : 0,
+            hashLen: remoteHash ? remoteHash.length : 0,
+            rawHashLen: rawHash ? String(rawHash).length : 0,
+            remoteHashPreview: remoteHash ? remoteHash.slice(0, 16) : null,
+            inputHashPreview: inputHash.slice(0, 16),
+            matchHashHex: remoteHash ? inputHash === remoteHash.toLowerCase() : false,
           });
           // Aceptamos múltiples formatos porque el ERP a veces guarda solo
           // `password` (texto plano) y otras veces actualiza `password_hash`.
           // Si cualquiera de los dos calza con lo ingresado, login OK.
           if (remoteHash) {
             // a) password_hash es SHA-256 hex del input
-            if (inputHash === String(remoteHash).toLowerCase()) return true;
+            if (inputHash === remoteHash.toLowerCase()) return true;
             // b) password_hash guardado en texto plano (algunos ERPs lo hacen)
             if (inputPassword === remoteHash) return true;
+            if (inputPassword.trim() === remoteHash) return true;
           }
           if (remotePlain) {
             // c) password en texto plano
             if (inputPassword === remotePlain) return true;
+            if (inputPassword.trim() === remotePlain) return true;
             // d) password contiene el hash SHA-256
-            if (inputHash === String(remotePlain).toLowerCase()) return true;
+            if (inputHash === remotePlain.toLowerCase()) return true;
           }
           if (!remoteHash && !remotePlain) {
             console.log('[repo] usuarios row sin password para rut', key);
