@@ -561,7 +561,9 @@ async function fetchTrabajadorFromSupabaseByRut(
           ...tRow,
           id: trabajadorUuid,
           rut: pickNonEmpty(tRow.rut, loginRow.rut),
-          rol: pickNonEmpty(tRow.rol, loginRow.rol) ?? null,
+          // El rol es propiedad de `usuarios` (lo gestiona el ERP).
+          // `trabajadores` no tiene rol; sólo permisos por módulo.
+          rol: pickNonEmpty(loginRow.rol, tRow.rol) ?? null,
           email: pickNonEmpty(loginRow.email, tRow.email) ?? null,
           nombre: pickNonEmpty(loginRow.nombre, tRow.nombre) ?? null,
           apellido: pickNonEmpty(loginRow.apellido, tRow.apellido) ?? null,
