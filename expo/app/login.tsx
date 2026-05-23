@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -21,7 +21,7 @@ import {
   IdCard,
   MapPin,
 } from 'lucide-react-native';
-import { useAuth, LoginError } from '@/contexts/AuthContext';
+import { useAuth, LoginError, KickedReason } from '@/contexts/AuthContext';
 import { COLORS } from '@/types';
 import { formatRut, validateRut } from '@/utils/rut';
 
@@ -42,21 +42,39 @@ const errorLabel: Record<LoginError, string> = {
 
 export default function LoginScreen(): React.ReactElement {
   const router = useRouter();
-  const { login, isSubmitting } = useAuth();
+  const { login, isSubmitting, kickedReason, clearKickedReason } = useAuth();
   const [rut, setRut] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [showPass, setShowPass] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
 
+  const kickedLabel: Record<KickedReason, string> = useMemo(
+    () => ({
+      app_desactivada:
+        'Tu administrador desactivó tu acceso a la app. Pedíle que vuelva a activarlo para poder ingresar.',
+      no_trabajador:
+        'Tu registro de trabajador fue eliminado. Contacta a tu administrador para volver a tener acceso.',
+      bloqueado:
+        'Tu cuenta fue marcada como inactiva. Solicita a tu administrador que la reactive.',
+    }),
+    [],
+  );
+
+  useEffect(() => {
+    if (kickedReason) setError(kickedLabel[kickedReason]);
+  }, [kickedReason, kickedLabel]);
+
   const rutValido = useMemo(() => rut.length > 0 && validateRut(rut), [rut]);
 
   const onRutChange = useCallback((v: string) => {
     setError('');
+    if (kickedReason) clearKickedReason();
     setRut(formatRut(v));
-  }, []);
+  }, [kickedReason, clearKickedReason]);
 
   const onSubmit = useCallback(async () => {
     setError('');
+    if (kickedReason) clearKickedReason();
     if (!rut.trim() || !password.trim()) {
       setError('Completa RUT y contraseña');
       return;
@@ -69,7 +87,7 @@ export default function LoginScreen(): React.ReactElement {
       }
       setError(msg);
     }
-  }, [rut, password, login]);
+  }, [rut, password, login, kickedReason, clearKickedReason]);
 
   return (
     <KeyboardAvoidingView

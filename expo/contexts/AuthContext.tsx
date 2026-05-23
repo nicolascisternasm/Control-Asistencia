@@ -5,6 +5,7 @@
 import createContextHook from '@nkzw/create-context-hook';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState, AppStateStatus } from 'react-native';
 import { Trabajador } from '@/types';
 import { repo } from '@/services/repository';
 import { cleanRut, validateRut } from '@/utils/rut';
@@ -17,6 +18,10 @@ import {
 
 const SESSION_KEY = 'ca.session.v1';
 const SESSION_TTL_DAYS = 30;
+/** Cada cuánto re-verificamos en background si el admin desactivó el acceso. */
+const APP_ACTIVA_POLL_MS = 60_000;
+
+export type KickedReason = 'app_desactivada' | 'no_trabajador' | 'bloqueado';
 
 interface SessionPayload {
   trabajadorId: string;
@@ -60,6 +65,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const [trabajador, setTrabajador] = useState<Trabajador | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [kickedReason, setKickedReason] = useState<KickedReason | null>(null);
 
   // Mantiene la id del trabajador actual en un ref para que los callbacks
   // (refreshTrabajador / updateProfile / changePassword) puedan tener
@@ -137,6 +143,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           expiresAt: expiresAt.toISOString(),
         };
         await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(payload));
+        setKickedReason(null);
         setTrabajador(t);
         return { ok: true };
       } finally {
@@ -150,6 +157,62 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     await AsyncStorage.removeItem(SESSION_KEY);
     setTrabajador(null);
   }, []);
+
+  const clearKickedReason = useCallback(() => {
+    setKickedReason(null);
+  }, []);
+
+  /**
+   * Verifica contra Supabase si el trabajador actual sigue habilitado para usar la app.
+   * Si el admin desactivó `app_activa`, marcó la cuenta como inactiva o eliminó el
+   * registro de trabajadores, cierra la sesión y deja `kickedReason` para que la
+   * pantalla de login muestre el motivo.
+   */
+  const checkStillAllowed = useCallback(async (): Promise<void> => {
+    const current = trabajadorRef.current;
+    if (!current) return;
+    try {
+      const fresh = await repo.getTrabajadorById(current.id);
+      let reason: KickedReason | null = null;
+      if (!fresh) {
+        reason = 'no_trabajador';
+      } else if (fresh.activo === false) {
+        reason = 'bloqueado';
+      } else if (fresh.app_activa === false) {
+        reason = 'app_desactivada';
+      }
+      if (reason) {
+        await AsyncStorage.removeItem(SESSION_KEY);
+        setTrabajador(null);
+        setKickedReason(reason);
+      } else if (fresh) {
+        setTrabajador((prev) => (prev && prev.id === current.id ? fresh : prev));
+      }
+    } catch (e) {
+      console.log('[auth] checkStillAllowed error', e);
+    }
+  }, []);
+
+  // Polling + AppState: cuando hay sesión, revisamos cada 60s y al volver al
+  // foreground si el admin desactivó el acceso desde el ERP.
+  useEffect(() => {
+    if (!trabajador) return;
+    let cancelled = false;
+    const tick = () => {
+      if (!cancelled) void checkStillAllowed();
+    };
+    const interval = setInterval(tick, APP_ACTIVA_POLL_MS);
+    const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
+      if (state === 'active') tick();
+    });
+    // Chequeo inmediato al montar (ej: al restaurar sesión).
+    tick();
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      sub.remove();
+    };
+  }, [trabajador?.id, checkStillAllowed]);
 
   const refreshTrabajador = useCallback(async (): Promise<Trabajador | null> => {
     const current = trabajadorRef.current;
@@ -231,6 +294,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     isAdmin: trabajador?.rol === 'admin' || trabajador?.rol === 'administrador',
     login,
     logout,
+    kickedReason,
+    clearKickedReason,
     register,
     refreshTrabajador,
     updateProfile,
