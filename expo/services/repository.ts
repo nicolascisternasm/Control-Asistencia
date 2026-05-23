@@ -460,6 +460,11 @@ async function fetchTrabajadorFromSupabaseByRut(rut: string): Promise<Trabajador
   const target = cleanRut(rut);
   const variants = rutVariants(rut);
   console.log('[repo] consultando login en supabase', { table: LOGIN_TABLE, rutInput: rut, target, variants });
+  // Invalidar cache de empresas en cada login para no quedar pegados con un
+  // mapa vacío que se haya cacheado antes de que RLS permitiera SELECT, o
+  // antes de que se creara la empresa_tenant del usuario recién registrado.
+  empresasCache = null;
+  empresasCacheAt = 0;
 
   /** Encuentra la fila del login en la tabla `usuarios` por RUT. */
   async function findLoginRow(): Promise<Record<string, unknown> | null> {
