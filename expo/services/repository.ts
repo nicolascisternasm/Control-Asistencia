@@ -129,8 +129,13 @@ const USUARIOS_TABLE = 'trabajadores';
 const PASSWORDS_TABLE = 'usuarios';
 const LOGIN_TABLE = 'usuarios';
 
-/** Tabla de empresas (id -> nombre). El ERP la mantiene. */
-const EMPRESAS_TABLE = 'empresas';
+/**
+ * Tablas de empresas (id -> nombre).
+ * - `empresas`: la mantiene el ERP (legacy).
+ * - `empresas_tenant`: la crea la app al registrar un admin nuevo.
+ * Se consultan ambas y se combinan en un solo mapa.
+ */
+const EMPRESAS_TABLES = ['empresas', 'empresas_tenant'] as const;
 
 /** Cache en memoria de id -> nombre de empresa. Se invalida al recargar la app. */
 let empresasCache: Map<string, string> | null = null;
@@ -148,29 +153,34 @@ async function fetchEmpresasMap(force = false): Promise<Map<string, string>> {
     empresasCacheAt = now;
     return map;
   }
-  try {
-    const { data, error } = await supabase
-      .from(EMPRESAS_TABLE)
-      .select('*')
-      .limit(2000);
-    if (error) {
-      console.log('[repo] fetchEmpresasMap error', error.message);
-    } else if (data) {
+  for (const table of EMPRESAS_TABLES) {
+    try {
+      const { data, error } = await supabase
+        .from(table)
+        .select('*')
+        .limit(2000);
+      if (error) {
+        console.log('[repo] fetchEmpresasMap error', table, error.message);
+        continue;
+      }
+      if (!data) continue;
       for (const row of data as Record<string, unknown>[]) {
         const id = row.id == null ? '' : String(row.id);
         if (!id) continue;
+        // Preferimos nombre_fantasia > razon_social > nombre. No sobrescribir
+        // si ya hay un nombre desde la tabla anterior (a menos que sea vacío).
         const name = pickString(row, [
-          'nombre',
-          'razon_social',
           'nombre_fantasia',
+          'razon_social',
+          'nombre',
           'name',
           'rut',
         ]);
-        if (name) map.set(id, name);
+        if (name && !map.get(id)) map.set(id, name);
       }
+    } catch (e) {
+      console.log('[repo] fetchEmpresasMap exception', table, e);
     }
-  } catch (e) {
-    console.log('[repo] fetchEmpresasMap exception', e);
   }
   empresasCache = map;
   empresasCacheAt = now;
