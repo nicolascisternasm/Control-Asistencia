@@ -28,7 +28,7 @@ import { formatRut, validateRut } from '@/utils/rut';
 const errorLabel: Record<LoginError, string> = {
   rut_invalido: 'El RUT ingresado no es válido',
   no_encontrado:
-    'No estás registrado en el sistema. Solicita a tu administrador que te registre o crea una cuenta nueva.',
+    'No estás registrado en el sistema. Solicita a tu administrador que te registre para poder ingresar.',
   no_es_trabajador:
     'Estás registrado como usuario, pero aún no como trabajador. Contacta a tu administrador para que te registre y puedas usar esta app.',
   password_incorrecta: 'La contraseña es incorrecta',
@@ -173,16 +173,6 @@ export default function LoginScreen(): React.ReactElement {
             <Text style={styles.forgotText}>Olvidé mi contraseña</Text>
           </TouchableOpacity>
         </View>
-
-        <TouchableOpacity
-          testID="btn-go-registro"
-          onPress={() => router.push('/registro')}
-          style={styles.registerBtn}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.registerHint}>¿Aún no tienes cuenta?</Text>
-          <Text style={styles.registerCta}>Regístrate</Text>
-        </TouchableOpacity>
 
         <Text style={styles.footer}>© 2026 ControlAsistencia</Text>
       </ScrollView>
