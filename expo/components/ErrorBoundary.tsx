@@ -43,9 +43,12 @@ export class ErrorBoundary extends React.Component<Props, State> {
         <Text style={styles.subtitle}>
           {this.props.fallbackLabel ?? 'Ocurrió un error inesperado en la aplicación.'}
         </Text>
-        {__DEV__ && this.state.error && (
+        {this.state.error && (
           <ScrollView style={styles.devBox}>
             <Text style={styles.devText}>{this.state.error.message}</Text>
+            {!!this.state.error.stack && (
+              <Text style={styles.devText}>{this.state.error.stack.split('\n').slice(0, 6).join('\n')}</Text>
+            )}
           </ScrollView>
         )}
         <TouchableOpacity style={styles.btn} onPress={this.handleReset} activeOpacity={0.85}>

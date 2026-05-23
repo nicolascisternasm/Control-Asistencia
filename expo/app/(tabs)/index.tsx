@@ -106,9 +106,16 @@ export default function DashboardScreen(): React.ReactElement {
   }, []);
 
   const hoy = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const marcacionesSafe = useMemo<typeof marcaciones>(
+    () => (Array.isArray(marcaciones) ? marcaciones : []),
+    [marcaciones],
+  );
   const marcacionesHoy = useMemo(
-    () => marcaciones.filter((m) => m.fecha_hora_servidor.slice(0, 10) === hoy),
-    [marcaciones, hoy],
+    () =>
+      marcacionesSafe.filter(
+        (m) => (m?.fecha_hora_servidor ?? '').slice(0, 10) === hoy,
+      ),
+    [marcacionesSafe, hoy],
   );
 
   const estadoJornada = useMemo<string>(() => {
@@ -358,14 +365,14 @@ export default function DashboardScreen(): React.ReactElement {
         <Text style={styles.section}>Actividad reciente</Text>
         {loading ? (
           <ActivityIndicator color={COLORS.primary} style={{ marginTop: 12 }} />
-        ) : marcaciones.length === 0 ? (
+        ) : marcacionesSafe.length === 0 ? (
           <View style={styles.emptyCard}>
             <Text style={styles.emptyText}>
               Aún no registras marcaciones. Cuando marques tu entrada la verás aquí.
             </Text>
           </View>
         ) : (
-          marcaciones.slice(0, 5).map((m) => {
+          marcacionesSafe.slice(0, 5).map((m) => {
             const Icon = ICONOS[m.tipo_marcacion];
             const d = new Date(m.fecha_hora_servidor);
             return (
