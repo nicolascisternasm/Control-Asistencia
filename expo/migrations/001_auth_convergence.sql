@@ -51,7 +51,7 @@ ALTER TABLE trabajadores
   ADD COLUMN IF NOT EXISTS deleted_at    TIMESTAMPTZ;
 
 -- supervisor_id y usuario_id: detectar el tipo real de la PK antes de crear FK
-DO $
+DO $do$
 DECLARE
   trab_id_type TEXT;
   user_id_type TEXT;
@@ -83,7 +83,7 @@ BEGIN
     EXECUTE 'ALTER TABLE trabajadores ADD CONSTRAINT trabajadores_usuario_id_fkey '
          || 'FOREIGN KEY (usuario_id) REFERENCES usuarios(id)';
   END IF;
-END $;
+END $do$;
 
 -- 4) Índices
 CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_rut
