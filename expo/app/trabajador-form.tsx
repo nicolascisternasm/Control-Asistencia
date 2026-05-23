@@ -317,7 +317,7 @@ export default function TrabajadorFormScreen(): React.ReactElement {
 
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Identificaci\u00f3n</Text>
+            <Text style={styles.sectionTitle}>Identificación</Text>
 
             <Text style={styles.label}>Nombre completo</Text>
             <View style={styles.input}>
@@ -374,7 +374,7 @@ export default function TrabajadorFormScreen(): React.ReactElement {
               />
             </View>
 
-            <Text style={styles.label}>Tel\u00e9fono (8 d\u00edgitos)</Text>
+            <Text style={styles.label}>Teléfono (8 dígitos)</Text>
             <View style={styles.input}>
               <Phone size={18} color={COLORS.textMuted} />
               <Text style={styles.phonePrefix}>+56 9</Text>
@@ -389,7 +389,7 @@ export default function TrabajadorFormScreen(): React.ReactElement {
                 testID="input-telefono"
               />
             </View>
-            <Text style={styles.helper}>Se guardan solo los 8 d\u00edgitos, sin el prefijo +569.</Text>
+            <Text style={styles.helper}>Se guardan solo los 8 dígitos, sin el prefijo +569.</Text>
           </View>
 
           <View style={styles.card}>
@@ -491,7 +491,7 @@ export default function TrabajadorFormScreen(): React.ReactElement {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.puntoName}>Sin punto asignado</Text>
-                  <Text style={styles.puntoAddr}>El trabajador no tendr\u00e1 validaci\u00f3n de geocerca</Text>
+                  <Text style={styles.puntoAddr}>El trabajador no tendrá validación de geocerca</Text>
                 </View>
                 <View style={[styles.radio, puntoTrabajoId === null && styles.radioActive]}>
                   {puntoTrabajoId === null && <View style={styles.radioDot} />}
@@ -527,7 +527,7 @@ export default function TrabajadorFormScreen(): React.ReactElement {
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>Horario del trabajador</Text>
             <Text style={styles.helper}>
-              Marca los d\u00edas laborables y define la hora de entrada/salida para cada uno.
+              Marca los días laborables y define la hora de entrada/salida para cada uno.
             </Text>
 
             {DIAS_HORARIO.map((dia) => {
@@ -582,7 +582,7 @@ export default function TrabajadorFormScreen(): React.ReactElement {
               );
             })}
 
-            <Text style={styles.label}>Tiempo de colaci\u00f3n (minutos)</Text>
+            <Text style={styles.label}>Tiempo de colación (minutos)</Text>
             <View style={styles.input}>
               <Timer size={18} color={COLORS.textMuted} />
               <TextInput
@@ -602,12 +602,12 @@ export default function TrabajadorFormScreen(): React.ReactElement {
                 testID="input-minutos-colacion"
               />
             </View>
-            <Text style={styles.helper}>Usa 0 si no hay colaci\u00f3n (jornada continua).</Text>
+            <Text style={styles.helper}>Usa 0 si no hay colación (jornada continua).</Text>
           </View>
 
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>Permisos del trabajador</Text>
-            <Text style={styles.helper}>Activa los m\u00f3dulos del ERP a los que tendr\u00e1 acceso.</Text>
+            <Text style={styles.helper}>Activa los módulos del ERP a los que tendrá acceso.</Text>
             {PERMISO_FIELDS.map((p) => (
               <View key={p.key} style={styles.toggleRow}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
@@ -655,7 +655,7 @@ export default function TrabajadorFormScreen(): React.ReactElement {
               </View>
               {!usuarioId && appActiva && (
                 <Text style={styles.helper}>
-                  Este trabajador a\u00fan no tiene cuenta de login. El acceso queda registrado, pero la cuenta debe crearse desde el ERP.
+                  Este trabajador aún no tiene cuenta de login. El acceso queda registrado, pero la cuenta debe crearse desde el ERP.
                 </Text>
               )}
             </View>
@@ -663,9 +663,9 @@ export default function TrabajadorFormScreen(): React.ReactElement {
 
           {isEdit && (
             <View style={styles.card}>
-              <Text style={styles.sectionTitle}>Restablecer contrase\u00f1a</Text>
+              <Text style={styles.sectionTitle}>Restablecer contraseña</Text>
               <Text style={styles.helper}>
-                Por seguridad, las contrase\u00f1as solo se restablecen desde el ERP. Esta funci\u00f3n no est\u00e1 disponible en la app.
+                Por seguridad, las contraseñas solo se restablecen desde el ERP. Esta función no está disponible en la app.
               </Text>
             </View>
           )}
