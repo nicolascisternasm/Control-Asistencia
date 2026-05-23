@@ -91,7 +91,21 @@ export const vacacionesService = {
       : pending;
 
     if (remote) {
-      const merged = dedupeById([...remote, ...pendingFiltered]);
+      // Source of truth = remote. Purgamos entradas locales/pending huérfanas:
+      //  - pending que ya existen en remote (ya se sincronizaron).
+      //  - pending que están resueltas (aprobada/rechazada) y no están en remote
+      //    (registros fantasma que quedaron de intentos fallidos o borrados en BD).
+      const remoteIds = new Set(remote.map((r) => r.id));
+      const cleanPendingAll = pending.filter(
+        (p) => !remoteIds.has(p.id) && p.estado === 'pendiente',
+      );
+      if (cleanPendingAll.length !== pending.length) {
+        await writePending(cleanPendingAll);
+      }
+      const cleanPendingFiltered = trabajadorId
+        ? cleanPendingAll.filter((v) => v.trabajador_id === trabajadorId)
+        : cleanPendingAll;
+      const merged = dedupeById([...remote, ...cleanPendingFiltered]);
       await writeLocal(merged);
       return merged.sort((a, b) => b.creado_en.localeCompare(a.creado_en));
     }
