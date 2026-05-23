@@ -458,16 +458,25 @@ async function fetchTrabajadorFromSupabaseByRut(rut: string): Promise<Trabajador
       }
       if (tRow) {
         trabajadorUuid = String(tRow.id ?? '');
-        // Los datos de `trabajadores` mandan (nombre/empresa/permisos);
-        // el id queda como el UUID de `trabajadores`, no el de `usuarios`.
-        // Pero el `rol` y el `email` viven en `usuarios`, así que los
-        // preservamos desde loginRow si trabajadores no los trae.
+        // Los datos de `trabajadores` mandan (empresa/permisos), pero si
+        // alguna columna clave (nombre/rol/email) viene vacía ahí, caemos
+        // a la fila de `usuarios` para no terminar con un trabajador sin
+        // nombre en la UI.
+        const pickNonEmpty = (a: unknown, b: unknown): unknown => {
+          const av = a == null ? '' : String(a).trim();
+          if (av) return a;
+          return b;
+        };
         mergedRow = {
           ...tRow,
           id: trabajadorUuid,
-          rut: tRow.rut ?? loginRow.rut,
-          rol: tRow.rol ?? loginRow.rol ?? null,
-          email: tRow.email ?? loginRow.email ?? null,
+          rut: pickNonEmpty(tRow.rut, loginRow.rut),
+          rol: pickNonEmpty(tRow.rol, loginRow.rol) ?? null,
+          email: pickNonEmpty(tRow.email, loginRow.email) ?? null,
+          nombre: pickNonEmpty(tRow.nombre, loginRow.nombre) ?? null,
+          nombres: pickNonEmpty(tRow.nombres, loginRow.nombres) ?? null,
+          apellidos: pickNonEmpty(tRow.apellidos, loginRow.apellidos) ?? null,
+          telefono: pickNonEmpty(tRow.telefono, loginRow.telefono) ?? null,
         };
       } else if (tErr) {
         console.log('[repo] lookup trabajadores by rut error', tErr.message);
@@ -643,30 +652,39 @@ export const repo = {
   async verifyPassword(rut: string, inputPassword: string): Promise<boolean> {
     const key = cleanRut(rut);
 
-    // 1) Si Supabase está habilitado, validar contra la tabla `usuarios`
-    //    (espejo gestionado por el ERP, vinculada a `trabajadores` por id).
+    // Fuente de verdad: tabla `usuarios` en Supabase (gestionada por el ERP).
+    // Solo `password_hash` es autoritativo. No existe columna `password` en
+    // este schema, así que NO la consultamos (la query fallaría con 42703 y
+    // dispararía el fallback local — bug histórico que permitía entrar con
+    // la contraseña '123456' o con un hash viejo cacheado en AsyncStorage).
     if (SUPABASE_ENABLED && supabase) {
+      const variants = rutVariants(rut);
+      let row: Record<string, unknown> | null = null;
       try {
-        // El id de `usuarios` NO coincide con el UUID de `trabajadores` en
-        // esta BD, así que buscamos directamente por RUT (variantes).
-        const variants = rutVariants(rut);
-        let row: Record<string, unknown> | null = null;
         const { data, error } = await supabase
           .from(PASSWORDS_TABLE)
-          .select('id, rut, password_hash, password')
+          .select('id, rut, password_hash, hash_method')
           .in('rut', variants)
           .limit(5);
         if (error) {
           console.log('[repo] supabase password verify .in error', error.message);
-        } else if (data && data.length > 0) {
+          // Error real de BD: NO caer a fallback local — devolver false
+          // para evitar aceptar contraseñas viejas.
+          return false;
+        }
+        if (data && data.length > 0) {
           row = data[0] as Record<string, unknown>;
         }
         if (!row) {
-          // Barrido tolerante por formato de RUT
-          const { data: all } = await supabase
+          // Barrido tolerante por formato de RUT distinto en la BD.
+          const { data: all, error: err2 } = await supabase
             .from(PASSWORDS_TABLE)
-            .select('id, rut, password_hash, password')
+            .select('id, rut, password_hash, hash_method')
             .limit(2000);
+          if (err2) {
+            console.log('[repo] supabase password verify barrido error', err2.message);
+            return false;
+          }
           if (all) {
             row =
               (all as Record<string, unknown>[]).find(
@@ -674,83 +692,53 @@ export const repo = {
               ) ?? null;
           }
         }
-        if (row) {
-          const rawHash = (row.password_hash as string | null) ?? null;
-          const rawPlain = (row.password as string | null) ?? null;
-          // Normalizar: quitar espacios/saltos de línea invisibles (común en
-          // imports CSV/Excel del ERP) y pasar a lowercase para comparar hex.
-          const remoteHash = rawHash ? String(rawHash).trim() : null;
-          const remotePlain = rawPlain ? String(rawPlain).trim() : null;
-          const inputHash = await hashPassword(inputPassword);
-          console.log('[repo] verify supabase', {
-            rut: key,
-            rutInRow: row.rut,
-            hasHash: !!remoteHash,
-            hasPlain: !!remotePlain,
-            hashLen: remoteHash ? remoteHash.length : 0,
-            rawHashLen: rawHash ? String(rawHash).length : 0,
-            remoteHashPreview: remoteHash ? remoteHash.slice(0, 16) : null,
-            inputHashPreview: inputHash.slice(0, 16),
-            matchHashHex: remoteHash ? inputHash === remoteHash.toLowerCase() : false,
-          });
-          // Aceptamos múltiples formatos porque el ERP a veces guarda solo
-          // `password` (texto plano) y otras veces actualiza `password_hash`.
-          // Si cualquiera de los dos calza con lo ingresado, login OK.
-          if (remoteHash) {
-            // a) password_hash es bcrypt (ERP MAMKAM web)
-            if (isBcryptHash(remoteHash)) {
-              const okBcrypt = await verifyBcrypt(inputPassword, remoteHash);
-              console.log('[repo] verify bcrypt', { rut: key, ok: okBcrypt });
-              if (okBcrypt) return true;
-            }
-            // b) password_hash es SHA-256 hex del input
-            if (inputHash === remoteHash.toLowerCase()) return true;
-            // c) password_hash guardado en texto plano (algunos ERPs lo hacen)
-            if (inputPassword === remoteHash) return true;
-            if (inputPassword.trim() === remoteHash) return true;
-          }
-          if (remotePlain) {
-            // c) password en texto plano
-            if (inputPassword === remotePlain) return true;
-            if (inputPassword.trim() === remotePlain) return true;
-            // d) password contiene el hash SHA-256
-            if (inputHash === remotePlain.toLowerCase()) return true;
-          }
-          if (!remoteHash && !remotePlain) {
-            console.log('[repo] usuarios row sin password para rut', key);
-          } else {
-            console.log('[repo] password no coincide para rut', key);
-            return false;
-          }
-        } else {
-          console.log('[repo] usuarios sin fila para rut', key);
-        }
       } catch (e) {
         console.log('[repo] supabase password verify exception', e);
+        return false;
       }
+
+      if (!row) {
+        console.log('[repo] usuarios sin fila para rut', key);
+        return false;
+      }
+
+      const rawHash = (row.password_hash as string | null) ?? null;
+      const remoteHash = rawHash ? String(rawHash).trim() : null;
+      const declaredMethod = String(row.hash_method ?? '').toLowerCase();
+      if (!remoteHash) {
+        console.log('[repo] usuarios row sin password_hash para rut', key);
+        return false;
+      }
+
+      // a) bcrypt: hash empieza con $2a$/$2b$/$2y$ o hash_method declarado
+      if (isBcryptHash(remoteHash) || declaredMethod === 'bcrypt') {
+        const okBcrypt = await verifyBcrypt(inputPassword, remoteHash);
+        console.log('[repo] verify bcrypt', { rut: key, ok: okBcrypt });
+        return okBcrypt;
+      }
+
+      // b) SHA-256 hex (formato usado por esta app)
+      const inputHash = await hashPassword(inputPassword);
+      const ok = inputHash === remoteHash.toLowerCase();
+      console.log('[repo] verify sha256', {
+        rut: key,
+        ok,
+        remotePreview: remoteHash.slice(0, 16),
+        inputPreview: inputHash.slice(0, 16),
+        declaredMethod: declaredMethod || '(none)',
+      });
+      return ok;
     }
 
+    // Modo offline / demo: solo se llega acá si Supabase está deshabilitado.
     const map = await readJson<Record<string, string>>(KEYS.passwords, {});
     const stored = map[key];
-
     if (stored) {
-      // Contraseña ya hasheada (v2)
       const inputHash = await hashPassword(inputPassword);
       return inputHash === stored;
     }
-
-    // Migración transparente: buscar en almacén legacy (texto plano)
-    const legacyMap = await readJson<Record<string, string>>(LEGACY_PASSWORDS_KEY, {});
-    const legacyStored = legacyMap[key] ?? '123456';
-    if (inputPassword !== legacyStored) return false;
-
-    // Migrar: guardar hash en v2 y limpiar legacy
-    const hash = await hashPassword(inputPassword);
-    map[key] = hash;
-    await writeJson(KEYS.passwords, map);
-    delete legacyMap[key];
-    await writeJson(LEGACY_PASSWORDS_KEY, legacyMap);
-    return true;
+    // Sin password registrado en local: rechazar (no default '123456').
+    return false;
   },
 
   async setPassword(rut: string, password: string): Promise<void> {
