@@ -37,18 +37,53 @@ UPDATE usuarios
    AND password_hash LIKE '$2%';
 
 -- 3) Columnas faltantes en trabajadores
+-- Nota: trabajadores.id y usuarios.id son TEXT en esta BD, así que
+-- supervisor_id y usuario_id deben ser TEXT (no UUID) para que la FK funcione.
 ALTER TABLE trabajadores
   ADD COLUMN IF NOT EXISTS apellidos     VARCHAR(150),
   ADD COLUMN IF NOT EXISTS email         VARCHAR(255),
   ADD COLUMN IF NOT EXISTS rol           VARCHAR(30) DEFAULT 'trabajador',
   ADD COLUMN IF NOT EXISTS empresa_id    UUID REFERENCES empresas_tenant(id),
-  ADD COLUMN IF NOT EXISTS supervisor_id UUID REFERENCES trabajadores(id),
-  ADD COLUMN IF NOT EXISTS usuario_id    UUID REFERENCES usuarios(id),
   ADD COLUMN IF NOT EXISTS app_activa    BOOLEAN DEFAULT true,
   ADD COLUMN IF NOT EXISTS permisos      JSONB   DEFAULT '{}',
   ADD COLUMN IF NOT EXISTS horario       JSONB   DEFAULT '{}',
   ADD COLUMN IF NOT EXISTS updated_at    TIMESTAMPTZ DEFAULT NOW(),
   ADD COLUMN IF NOT EXISTS deleted_at    TIMESTAMPTZ;
+
+-- supervisor_id y usuario_id: detectar el tipo real de la PK antes de crear FK
+DO $
+DECLARE
+  trab_id_type TEXT;
+  user_id_type TEXT;
+BEGIN
+  SELECT data_type INTO trab_id_type
+    FROM information_schema.columns
+   WHERE table_name = 'trabajadores' AND column_name = 'id';
+
+  SELECT data_type INTO user_id_type
+    FROM information_schema.columns
+   WHERE table_name = 'usuarios' AND column_name = 'id';
+
+  -- supervisor_id (autoreferencia a trabajadores)
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_name = 'trabajadores' AND column_name = 'supervisor_id'
+  ) THEN
+    EXECUTE format('ALTER TABLE trabajadores ADD COLUMN supervisor_id %s', trab_id_type);
+    EXECUTE 'ALTER TABLE trabajadores ADD CONSTRAINT trabajadores_supervisor_id_fkey '
+         || 'FOREIGN KEY (supervisor_id) REFERENCES trabajadores(id)';
+  END IF;
+
+  -- usuario_id (referencia a usuarios)
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_name = 'trabajadores' AND column_name = 'usuario_id'
+  ) THEN
+    EXECUTE format('ALTER TABLE trabajadores ADD COLUMN usuario_id %s', user_id_type);
+    EXECUTE 'ALTER TABLE trabajadores ADD CONSTRAINT trabajadores_usuario_id_fkey '
+         || 'FOREIGN KEY (usuario_id) REFERENCES usuarios(id)';
+  END IF;
+END $;
 
 -- 4) Índices
 CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_rut
