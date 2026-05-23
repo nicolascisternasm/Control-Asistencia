@@ -648,7 +648,44 @@ export const repo = {
           .eq('id', id)
           .maybeSingle();
         if (!error && data) {
-          const mapped = mapSupabaseTrabajador(data as Record<string, unknown>);
+          const tRow = data as Record<string, unknown>;
+          // `trabajadores` no tiene `rol` ni necesariamente `email`. Esos
+          // campos los maneja el ERP en la tabla `usuarios`. Para que el
+          // polling no degrade un admin a 'trabajador', enriquecemos con
+          // la fila de `usuarios` por RUT.
+          let mergedRow: Record<string, unknown> = tRow;
+          try {
+            const rutStr = String(tRow.rut ?? '');
+            if (rutStr) {
+              const variants = rutVariants(rutStr);
+              const { data: uRows } = await supabase
+                .from(LOGIN_TABLE)
+                .select('*')
+                .in('rut', variants)
+                .limit(1);
+              const uRow = uRows && uRows.length > 0 ? (uRows[0] as Record<string, unknown>) : null;
+              if (uRow) {
+                const pickNonEmpty = (a: unknown, b: unknown): unknown => {
+                  const av = a == null ? '' : String(a).trim();
+                  if (av) return a;
+                  return b;
+                };
+                mergedRow = {
+                  ...tRow,
+                  rol: pickNonEmpty(uRow.rol, tRow.rol) ?? null,
+                  email: pickNonEmpty(uRow.email, tRow.email) ?? null,
+                  nombre: pickNonEmpty(uRow.nombre, tRow.nombre) ?? null,
+                  apellido: pickNonEmpty(uRow.apellido, tRow.apellido) ?? null,
+                  nombres: pickNonEmpty(uRow.nombres, tRow.nombres) ?? null,
+                  apellidos: pickNonEmpty(uRow.apellidos, tRow.apellidos) ?? null,
+                  empresa_id: pickNonEmpty(uRow.empresa_id, tRow.empresa_id) ?? null,
+                };
+              }
+            }
+          } catch (e) {
+            console.log('[repo] getTrabajadorById merge usuarios exception', e);
+          }
+          const mapped = mapSupabaseTrabajador(mergedRow);
           const empresasMap = await fetchEmpresasMap();
           return resolveEmpresa(mapped, empresasMap);
         }
