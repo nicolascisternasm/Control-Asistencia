@@ -325,7 +325,7 @@ export default function TrabajadorFormScreen(): React.ReactElement {
               <TextInput
                 value={nombres}
                 onChangeText={setNombres}
-                placeholder="Mar\u00eda Paz Gonz\u00e1lez"
+                placeholder="Ej: María Paz"
                 placeholderTextColor={COLORS.textMuted}
                 style={styles.inputText}
                 testID="input-nombres"
@@ -337,7 +337,7 @@ export default function TrabajadorFormScreen(): React.ReactElement {
               <TextInput
                 value={apellidos}
                 onChangeText={setApellidos}
-                placeholder="Si los manejas por separado"
+                placeholder="Ej: González Soto"
                 placeholderTextColor={COLORS.textMuted}
                 style={styles.inputText}
                 testID="input-apellidos"
