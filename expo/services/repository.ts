@@ -9,10 +9,12 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   AsignacionTrabajo,
+  DIAS_HORARIO,
   HorarioTrabajador,
   HORARIO_DEFAULT,
   Marcacion,
   PuntoTrabajo,
+  recalcHorarioDerivados,
   SolicitudPassword,
   SolicitudOmitirColacion,
   SolicitudVacaciones,
@@ -355,31 +357,161 @@ function mapSupabaseTrabajador(row: Record<string, unknown>): Trabajador {
       (row.usuario_id as string | null) ??
       (row.user_id as string | null) ??
       null,
-    horario: parseHorario(row.horario),
+    // El horario ya no se guarda en `trabajadores` (JSONB).
+    // Vive en la tabla `horarios_trabajadores`. Se completa aparte.
+    horario: undefined,
   };
 }
 
-/** Parsea el JSONB `horario` de la tabla `trabajadores`. */
-function parseHorario(raw: unknown): HorarioTrabajador | undefined {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
-  const h = raw as Record<string, unknown>;
-  if (Object.keys(h).length === 0) return undefined;
+/**
+ * Parsea una fila de la tabla `horarios_trabajadores` (columnas por día)
+ * a la forma `HorarioTrabajador` que usa la app.
+ */
+function parseHorarioRow(row: Record<string, unknown> | null | undefined): HorarioTrabajador | undefined {
+  if (!row) return undefined;
   const num = (v: unknown, d: number): number => {
     if (typeof v === 'number' && Number.isFinite(v)) return v;
     if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Number(v);
     return d;
   };
-  return {
-    hora_entrada: typeof h.hora_entrada === 'string' ? h.hora_entrada : HORARIO_DEFAULT.hora_entrada,
-    hora_salida: typeof h.hora_salida === 'string' ? h.hora_salida : HORARIO_DEFAULT.hora_salida,
-    minutos_colacion: num(h.minutos_colacion, HORARIO_DEFAULT.minutos_colacion),
-    usa_colacion: typeof h.usa_colacion === 'boolean' ? h.usa_colacion : HORARIO_DEFAULT.usa_colacion,
-    horas_jornada: num(h.horas_jornada, HORARIO_DEFAULT.horas_jornada),
-    tolerancia_minutos: num(h.tolerancia_minutos, HORARIO_DEFAULT.tolerancia_minutos),
-    dias_laborables: Array.isArray(h.dias_laborables)
-      ? (h.dias_laborables as unknown[]).map((x) => Number(x)).filter((x) => Number.isFinite(x))
-      : HORARIO_DEFAULT.dias_laborables,
+  const str = (v: unknown, d: string): string => {
+    if (typeof v === 'string' && v.trim() !== '') {
+      // time columns pueden venir como 'HH:MM:SS' -> recortar a HH:MM
+      return v.length >= 5 ? v.slice(0, 5) : v;
+    }
+    return d;
   };
+  const bool = (v: unknown, d: boolean): boolean => (typeof v === 'boolean' ? v : d);
+
+  const base: HorarioTrabajador = { ...HORARIO_DEFAULT };
+  for (const dia of DIAS_HORARIO) {
+    base[dia] = bool(row[dia], HORARIO_DEFAULT[dia]);
+    const ek = `${dia}_entrada` as const;
+    const sk = `${dia}_salida` as const;
+    base[ek] = str(row[ek], HORARIO_DEFAULT[ek]);
+    base[sk] = str(row[sk], HORARIO_DEFAULT[sk]);
+  }
+  base.minutos_colacion = num(row.minutos_colacion, HORARIO_DEFAULT.minutos_colacion);
+  return recalcHorarioDerivados(base);
+}
+
+/** Construye el payload para insertar/actualizar en `horarios_trabajadores`. */
+function horarioToRow(h: HorarioTrabajador): Record<string, unknown> {
+  const row: Record<string, unknown> = {
+    minutos_colacion: h.minutos_colacion ?? 60,
+  };
+  for (const dia of DIAS_HORARIO) {
+    row[dia] = !!h[dia];
+    row[`${dia}_entrada`] = h[`${dia}_entrada` as const] || '08:30';
+    row[`${dia}_salida`] = h[`${dia}_salida` as const] || '17:30';
+  }
+  return row;
+}
+
+async function fetchHorarioFromSupabase(trabajadorId: string): Promise<HorarioTrabajador | undefined> {
+  if (!SUPABASE_ENABLED || !supabase) return undefined;
+  try {
+    const { data, error } = await supabase
+      .from('horarios_trabajadores')
+      .select('*')
+      .eq('trabajador_id', trabajadorId)
+      .maybeSingle();
+    if (error) {
+      console.log('[repo] fetchHorario error', error.message);
+      return undefined;
+    }
+    return parseHorarioRow(data as Record<string, unknown> | null);
+  } catch (e) {
+    console.log('[repo] fetchHorario exception', e);
+    return undefined;
+  }
+}
+
+async function upsertHorarioInSupabase(
+  trabajadorId: string,
+  empresaId: string | null | undefined,
+  horario: HorarioTrabajador,
+): Promise<void> {
+  if (!SUPABASE_ENABLED || !supabase || !trabajadorId) return;
+  try {
+    const { data: existing } = await supabase
+      .from('horarios_trabajadores')
+      .select('id')
+      .eq('trabajador_id', trabajadorId)
+      .limit(1);
+    const row: Record<string, unknown> = {
+      ...horarioToRow(horario),
+      trabajador_id: trabajadorId,
+    };
+    if (empresaId) row.empresa_id = empresaId;
+    if (existing && existing.length > 0) {
+      const id = (existing[0] as Record<string, unknown>).id;
+      const { error } = await supabase
+        .from('horarios_trabajadores')
+        .update(row)
+        .eq('id', id);
+      if (error) console.log('[repo] upsertHorario update error', error.message);
+    } else {
+      const { error } = await supabase.from('horarios_trabajadores').insert(row);
+      if (error) console.log('[repo] upsertHorario insert error', error.message);
+    }
+  } catch (e) {
+    console.log('[repo] upsertHorario exception', e);
+  }
+}
+
+/**
+ * Sincroniza ciertos campos del trabajador con la tabla `usuarios` cuando
+ * el trabajador ya tiene cuenta de login (usuario vinculado por id o RUT).
+ * Si NO existe fila en `usuarios`, no se hace nada (no creamos cuentas
+ * desde la app porque `password_hash` es obligatorio).
+ */
+async function syncUsuarioFromTrabajador(t: Partial<Trabajador> & { rut?: string; usuario_id?: string | null }): Promise<void> {
+  if (!SUPABASE_ENABLED || !supabase) return;
+  if (!t.rut && !t.usuario_id) return;
+  try {
+    let row: Record<string, unknown> | null = null;
+    if (t.usuario_id) {
+      const { data } = await supabase
+        .from(LOGIN_TABLE)
+        .select('id')
+        .eq('id', t.usuario_id)
+        .maybeSingle();
+      if (data) row = data as Record<string, unknown>;
+    }
+    if (!row && t.rut) {
+      const variants = rutVariants(t.rut);
+      const { data } = await supabase
+        .from(LOGIN_TABLE)
+        .select('id')
+        .in('rut', variants)
+        .limit(1);
+      if (data && data.length > 0) row = data[0] as Record<string, unknown>;
+    }
+    if (!row) {
+      console.log('[repo] syncUsuario: no hay fila en usuarios para sincronizar');
+      return;
+    }
+    const update: Record<string, unknown> = {};
+    if (t.nombres !== undefined || t.apellidos !== undefined) {
+      update.nombre = `${t.nombres ?? ''} ${t.apellidos ?? ''}`.trim();
+    }
+    if (t.rut !== undefined) update.rut = t.rut;
+    if (t.email !== undefined) update.email = t.email;
+    if (t.app_activa !== undefined) update.activo = !!t.app_activa;
+    if (t.app_activa !== undefined) update.estado = t.app_activa ? 'activo' : 'inactivo';
+    if (t.empresa_id) update.empresa_id = t.empresa_id;
+    // Rol siempre 'trabajador' cuando se sincroniza desde la app.
+    update.rol = 'trabajador';
+    if (Object.keys(update).length === 0) return;
+    const { error } = await supabase
+      .from(LOGIN_TABLE)
+      .update(update)
+      .eq('id', row.id as string);
+    if (error) console.log('[repo] syncUsuario update error', error.message);
+  } catch (e) {
+    console.log('[repo] syncUsuario exception', e);
+  }
 }
 
 /** Quita acentos y baja a min para comparar nombres de empresa de forma tolerante. */
@@ -415,8 +547,9 @@ function trabajadorToRow(t: Partial<Trabajador>): Record<string, unknown> {
   if (t.app_activa !== undefined) row.app_activa = t.app_activa;
   if (t.sueldo !== undefined) row.sueldo = t.sueldo;
   if (t.usuario_id !== undefined && t.usuario_id !== null) row.usuario_id = t.usuario_id;
-  if (t.horario !== undefined) row.horario = t.horario;
-  if (t.rol !== undefined) row.rol = t.rol;
+  // `rol` y `horario` NO se guardan en `trabajadores`:
+  // - el rol vive en `usuarios` (lo gestiona el ERP)
+  // - el horario vive en `horarios_trabajadores`
   if (t.activo !== undefined) row.estado = t.activo ? 'activo' : 'inactivo';
   if (t.permisos) {
     if (t.permisos.puede_cotizar !== undefined) row.puede_cotizar = t.permisos.puede_cotizar;
@@ -745,7 +878,9 @@ export const repo = {
           }
           const mapped = mapSupabaseTrabajador(mergedRow);
           const empresasMap = await fetchEmpresasMap();
-          return resolveEmpresa(mapped, empresasMap);
+          const withEmpresa = resolveEmpresa(mapped, empresasMap);
+          const horario = await fetchHorarioFromSupabase(id);
+          return { ...withEmpresa, horario: horario ?? withEmpresa.horario };
         }
       } catch (e) {
         console.log('[repo] getTrabajadorById supabase exception', e);
@@ -769,7 +904,21 @@ export const repo = {
         throw new Error(`Supabase: ${error.message}`);
       }
       const created = data ? mapSupabaseTrabajador(data as Record<string, unknown>) : { ...t };
-      return created;
+      if (t.horario && created.id) {
+        await upsertHorarioInSupabase(created.id, t.empresa_id ?? created.empresa_id ?? null, t.horario);
+      }
+      if (t.app_activa !== undefined) {
+        await syncUsuarioFromTrabajador({
+          rut: t.rut,
+          nombres: t.nombres,
+          apellidos: t.apellidos,
+          email: t.email,
+          app_activa: t.app_activa,
+          empresa_id: t.empresa_id ?? null,
+          usuario_id: t.usuario_id ?? null,
+        });
+      }
+      return { ...created, horario: t.horario ?? created.horario };
     }
     const all = await ensureTrabajadoresSeeded();
     const exists = all.find((x) => cleanRut(x.rut) === cleanRut(t.rut));
@@ -782,12 +931,59 @@ export const repo = {
   async updateTrabajador(id: string, patch: Partial<Trabajador>): Promise<void> {
     if (SUPABASE_ENABLED && supabase) {
       const row = trabajadorToRow(patch);
-      const { error } = await supabase
-        .from(USUARIOS_TABLE)
-        .update(row)
-        .eq('id', id);
-      if (error) {
-        throw new Error(`Supabase: ${error.message}`);
+      if (Object.keys(row).length > 0) {
+        const { error } = await supabase
+          .from(USUARIOS_TABLE)
+          .update(row)
+          .eq('id', id);
+        if (error) {
+          throw new Error(`Supabase: ${error.message}`);
+        }
+      }
+      if (patch.horario) {
+        // Necesitamos el RUT/empresa_id si no vinieron en el patch.
+        let empresaId: string | null = patch.empresa_id ?? null;
+        if (!empresaId) {
+          const { data: tRow } = await supabase
+            .from(USUARIOS_TABLE)
+            .select('empresa_id')
+            .eq('id', id)
+            .maybeSingle();
+          empresaId = (tRow as Record<string, unknown> | null)?.empresa_id as string | null ?? null;
+        }
+        await upsertHorarioInSupabase(id, empresaId, patch.horario);
+      }
+      // Sincronizar con `usuarios` cuando hay cambios relevantes
+      if (
+        patch.app_activa !== undefined ||
+        patch.nombres !== undefined ||
+        patch.apellidos !== undefined ||
+        patch.email !== undefined ||
+        patch.rut !== undefined
+      ) {
+        // Necesitamos el RUT si no vino en el patch
+        let rut = patch.rut;
+        let usuarioId = patch.usuario_id ?? null;
+        let empresaId = patch.empresa_id ?? null;
+        if (!rut || !empresaId) {
+          const { data: tRow } = await supabase
+            .from(USUARIOS_TABLE)
+            .select('rut, usuario_id, empresa_id')
+            .eq('id', id)
+            .maybeSingle();
+          const r = tRow as Record<string, unknown> | null;
+          if (r) {
+            if (!rut) rut = String(r.rut ?? '');
+            if (!usuarioId) usuarioId = (r.usuario_id as string | null) ?? null;
+            if (!empresaId) empresaId = (r.empresa_id as string | null) ?? null;
+          }
+        }
+        await syncUsuarioFromTrabajador({
+          ...patch,
+          rut,
+          usuario_id: usuarioId,
+          empresa_id: empresaId,
+        });
       }
       return;
     }

@@ -11,25 +11,128 @@ export type TipoMarcacion =
 
 export type EstadoValidacion = 'valida' | 'pendiente_revision' | 'alerta';
 
+/**
+ * Horario semanal del trabajador. La fuente de verdad es la tabla
+ * `horarios_trabajadores` (columnas por día). Los campos `hora_entrada`,
+ * `hora_salida`, `dias_laborables`, `usa_colacion`, `horas_jornada` y
+ * `tolerancia_minutos` se derivan al cargar para mantener compatibilidad
+ * con utilitarios existentes (cálculo de horas extra, atrasos, etc.).
+ */
 export interface HorarioTrabajador {
+  // Fuente de verdad (tabla horarios_trabajadores)
+  lunes: boolean;
+  martes: boolean;
+  miercoles: boolean;
+  jueves: boolean;
+  viernes: boolean;
+  sabado: boolean;
+  domingo: boolean;
+  lunes_entrada: string;
+  lunes_salida: string;
+  martes_entrada: string;
+  martes_salida: string;
+  miercoles_entrada: string;
+  miercoles_salida: string;
+  jueves_entrada: string;
+  jueves_salida: string;
+  viernes_entrada: string;
+  viernes_salida: string;
+  sabado_entrada: string;
+  sabado_salida: string;
+  domingo_entrada: string;
+  domingo_salida: string;
+  minutos_colacion: number;
+
+  // Derivados para retrocompatibilidad con utils/horas.ts
   hora_entrada: string;
   hora_salida: string;
-  minutos_colacion: number;
   usa_colacion: boolean;
   horas_jornada: number;
   tolerancia_minutos: number;
   dias_laborables: number[];
 }
 
+export const DIAS_HORARIO = [
+  'lunes',
+  'martes',
+  'miercoles',
+  'jueves',
+  'viernes',
+  'sabado',
+  'domingo',
+] as const;
+export type DiaHorario = (typeof DIAS_HORARIO)[number];
+
+/** Mapea día -> número (Lunes=1 ... Domingo=0). */
+export const DIA_TO_NUM: Record<DiaHorario, number> = {
+  lunes: 1,
+  martes: 2,
+  miercoles: 3,
+  jueves: 4,
+  viernes: 5,
+  sabado: 6,
+  domingo: 0,
+};
+
 export const HORARIO_DEFAULT: HorarioTrabajador = {
+  lunes: true,
+  martes: true,
+  miercoles: true,
+  jueves: true,
+  viernes: true,
+  sabado: false,
+  domingo: false,
+  lunes_entrada: '08:30',
+  lunes_salida: '17:30',
+  martes_entrada: '08:30',
+  martes_salida: '17:30',
+  miercoles_entrada: '08:30',
+  miercoles_salida: '17:30',
+  jueves_entrada: '08:30',
+  jueves_salida: '17:30',
+  viernes_entrada: '08:30',
+  viernes_salida: '17:30',
+  sabado_entrada: '08:30',
+  sabado_salida: '13:00',
+  domingo_entrada: '08:30',
+  domingo_salida: '13:00',
+  minutos_colacion: 60,
   hora_entrada: '08:30',
   hora_salida: '17:30',
-  minutos_colacion: 60,
   usa_colacion: true,
   horas_jornada: 8,
   tolerancia_minutos: 10,
   dias_laborables: [1, 2, 3, 4, 5],
 };
+
+/**
+ * Recalcula los campos derivados a partir de los flags y horas por día.
+ * Útil tras editar el horario en el formulario para mantener consistente
+ * `hora_entrada`/`hora_salida`/`dias_laborables` con la fuente per-día.
+ */
+export function recalcHorarioDerivados(h: HorarioTrabajador): HorarioTrabajador {
+  const dias_laborables = DIAS_HORARIO.filter((d) => h[d]).map((d) => DIA_TO_NUM[d]).sort();
+  const primeraActiva = DIAS_HORARIO.find((d) => h[d]);
+  const hora_entrada = primeraActiva ? h[`${primeraActiva}_entrada` as const] || '08:30' : h.hora_entrada;
+  const hora_salida = primeraActiva ? h[`${primeraActiva}_salida` as const] || '17:30' : h.hora_salida;
+  const usa_colacion = (h.minutos_colacion ?? 0) > 0;
+  // Horas de jornada: estimadas a partir de la primera jornada activa
+  let horas_jornada = h.horas_jornada ?? 8;
+  if (primeraActiva) {
+    const [eh, em] = hora_entrada.split(':').map((n) => Number(n));
+    const [sh, sm] = hora_salida.split(':').map((n) => Number(n));
+    const mins = (sh * 60 + (sm || 0)) - (eh * 60 + (em || 0)) - (usa_colacion ? (h.minutos_colacion ?? 0) : 0);
+    if (Number.isFinite(mins) && mins > 0) horas_jornada = Math.round((mins / 60) * 100) / 100;
+  }
+  return {
+    ...h,
+    dias_laborables,
+    hora_entrada,
+    hora_salida,
+    usa_colacion,
+    horas_jornada,
+  };
+}
 
 export type EstadoSolicitud = 'pendiente' | 'aprobada' | 'rechazada';
 
