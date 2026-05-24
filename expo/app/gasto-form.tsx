@@ -358,11 +358,11 @@ Si un dato no se ve claro, déjalo vacío ("") o 0. NO inventes datos.`;
   const montoFormateado = useMemo(() => {
     const n = parseFloat(monto.replace(/\./g, '').replace(',', '.'));
     if (isNaN(n) || n <= 0) return '';
-    return new Intl.NumberFormat('es-CL', {
-      style: 'currency',
-      currency: 'CLP',
-      maximumFractionDigits: 0,
-    }).format(n);
+    const rounded = Math.round(n);
+    const sign = rounded < 0 ? '-' : '';
+    const abs = Math.abs(rounded).toString();
+    const withDots = abs.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    return `${sign}${withDots}`;
   }, [monto]);
 
   return (

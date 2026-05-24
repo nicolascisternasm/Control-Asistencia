@@ -43,11 +43,11 @@ const FILTROS: { id: Filtro; label: string }[] = [
 ];
 
 function formatCLP(n: number): string {
-  return new Intl.NumberFormat('es-CL', {
-    style: 'currency',
-    currency: 'CLP',
-    maximumFractionDigits: 0,
-  }).format(n);
+  const rounded = Math.round(n);
+  const sign = rounded < 0 ? '-' : '';
+  const abs = Math.abs(rounded).toString();
+  const withDots = abs.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return `${sign}${withDots}`;
 }
 
 export default function GastosScreen(): React.ReactElement {
