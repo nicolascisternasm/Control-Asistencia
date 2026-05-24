@@ -119,9 +119,14 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         const t = lookup.trabajador;
         if (!t.activo) return { ok: false, error: 'bloqueado' };
         if (t.app_activa === false) return { ok: false, error: 'app_desactivada' };
-        // Nota: la validación soporta tanto SHA-256 (app) como bcrypt (ERP web).
-        // El repo decide el algoritmo según el formato del hash almacenado.
+        // Nota: bcryptjs no es compatible con Hermes, así que la app NO valida
+        // bcrypt en cliente. Si el usuario fue creado en el ERP web, le pedimos
+        // que recupere la contraseña desde allí.
         const cleanPassword = password.trim();
+        const method = await repo.getHashMethodByRut(rut);
+        if (method === 'bcrypt') {
+          return { ok: false, error: 'usar_web' };
+        }
         const passwordOk = await repo.verifyPassword(rut, cleanPassword);
         if (!passwordOk) {
           let hashPreview: string | undefined;

@@ -7,7 +7,6 @@
 // Todos producen el MISMO hex (64 chars lowercase), idéntico al ERP.
 
 import * as ExpoCrypto from 'expo-crypto';
-import bcrypt from 'bcryptjs';
 
 function bytesToHex(bytes: Uint8Array): string {
   let out = '';
@@ -150,18 +149,21 @@ export function isBcryptHash(value: string): boolean {
 
 /**
  * Verifica una contraseña en texto plano contra un hash bcrypt.
- * Compatible con el ERP MAMKAM (que usa bcrypt para sus usuarios web).
+ *
+ * NOTA: Esta función SIEMPRE devuelve `false` en la app móvil. Los usuarios
+ * gestionados por el ERP (con `hash_method='bcrypt'`) deben recuperar su
+ * contraseña desde la web — la app no valida bcrypt en cliente porque la
+ * librería `bcryptjs` no es compatible con Hermes (es ESM puro y depende
+ * del módulo `crypto` de Node, que no existe en React Native).
+ *
+ * El caller debe detectar bcrypt con `isBcryptHash` y mostrar al usuario
+ * el mensaje para restablecer la contraseña desde el ERP.
  */
 export async function verifyBcrypt(
-  password: string,
-  hash: string,
+  _password: string,
+  _hash: string,
 ): Promise<boolean> {
-  try {
-    return await bcrypt.compare(password, hash);
-  } catch (e) {
-    console.log('[crypto] bcrypt compare error', e);
-    return false;
-  }
+  return false;
 }
 
 export function generateRandomPassword(length = 10): string {
